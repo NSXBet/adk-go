@@ -59,12 +59,11 @@ func NewGRootRunner(cfg *GRootRunnerConfig) (*GRootRunner, error) {
 
 func (r *GRootRunner) Run(ctx context.Context, userID, sessionID string, msg *genai.Content, cfg *RunConfig) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
-		session, err := r.cfg.SessionService.Get(ctx, &sessionservice.GetRequest{
-			ID: session.ID{
-				AppName:   r.cfg.AppName,
-				UserID:    userID,
-				SessionID: sessionID,
-			},
+		// TODO: Replace with Get.
+		session, err := r.cfg.SessionService.Create(ctx, &sessionservice.CreateRequest{
+			AppName:   r.cfg.AppName,
+			UserID:    userID,
+			SessionID: sessionID,
 		})
 		if err != nil {
 			yield(nil, err)
