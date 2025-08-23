@@ -99,12 +99,35 @@ func (r *GRootRunner) Run(ctx context.Context, userID, sessionID string, msg *ge
 			return
 		}
 
+		input := uuid.NewString()
+		output := uuid.NewString()
+		shadow, status, err := r.session.NewADKShadow(agentToRun.Name(), input, output)
+		if err != nil {
+			if !yield(nil, err) {
+				return
+			}
+		}
+		if status == internal.ShadowStatusCompleted {
+			// TODO: Retrieve the previous.
+		}
+
 		for event, err := range agentToRun.Run(ctx) {
 			if err != nil {
-				if !yield(event, err) {
-					return
+				if event.LLMResponse != nil {
+					if !yield(event, err) {
+						return
+					}
 				}
 				continue
+			}
+
+			// TODO: Write the entire event.
+			for _, part := range event.LLMResponse.Content.Parts {
+				if err := shadow.WriteFrame(output, internal.ChunkFromPart(part), event.LLMResponse.Partial); err != nil {
+					if !yield(nil, err) {
+						return
+					}
+				}
 			}
 
 			// only commit non-partial event to a session service

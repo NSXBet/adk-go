@@ -3,6 +3,7 @@ package internal
 import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"google.golang.org/genai"
 )
 
 type Client struct {
@@ -137,4 +138,20 @@ func (s *Session) writeShadowAction(name string, input, output string) (waitID s
 		return "", err
 	}
 	return waitID, err
+}
+
+func ChunkFromPart(p *genai.Part) *Chunk {
+	var chunk Chunk
+	switch {
+	case p.Text != "":
+		chunk.MIMEType = "text/plain"
+		chunk.Data = []byte(p.Text)
+	case p.InlineData != nil:
+		chunk.MIMEType = p.InlineData.MIMEType
+		chunk.Data = p.InlineData.Data
+	default:
+		// TODO(jbd): Support all types.
+		panic("part not supported yet")
+	}
+	return &chunk
 }
