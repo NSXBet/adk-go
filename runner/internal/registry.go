@@ -31,3 +31,7 @@ func (r *Registry) register(prefix string, agent agent.Agent) {
 func (r *Registry) AgentFullname(agent agent.Agent) string {
 	return r.agentNames[agent]
 }
+
+func (r *Registry) Resolve(fullname string) agent.Agent {
+	return r.agents[fullname]
+}

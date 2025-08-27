@@ -411,7 +411,13 @@ func (r *ResumerGRootRunner) replay(ctx context.Context, session sessionservice.
 }
 
 func (r *ResumerGRootRunner) replayAgent(ctx context.Context, agent, input, output string) error {
+	a := r.registry.Resolve(agent)
+	if a == nil {
+		return fmt.Errorf("agent %q not found", agent)
+	}
 	panic("not implemented")
+	// TODO: Check if input is available.
+	// Write output to output.
 	// TODO: Log agent_end.
 }
 
