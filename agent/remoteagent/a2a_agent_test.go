@@ -17,6 +17,7 @@ package remoteagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"net"
@@ -72,7 +73,9 @@ func startA2AServer(t *testing.T, agentExecutor a2asrv.AgentExecutor, listener *
 
 	grpcHandler.RegisterWith(s)
 	if err := s.Serve(listener); err != nil {
-		t.Errorf("Server exited with error: %v", err)
+		if !errors.Is(err, grpc.ErrServerStopped) {
+			t.Errorf("Server exited with error: %v", err)
+		}
 	}
 }
 
