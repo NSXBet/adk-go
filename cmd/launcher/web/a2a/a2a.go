@@ -19,22 +19,19 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	"strings"
+	"net/url"
 
 	a2acore "github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2agrpc"
 	"github.com/a2aproject/a2a-go/a2asrv"
 	"github.com/gorilla/mux"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/adk/adka2a"
 	"google.golang.org/adk/cmd/launcher/adk"
 	"google.golang.org/adk/cmd/launcher/web"
 	"google.golang.org/adk/internal/cli/util"
 	"google.golang.org/adk/runner"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
+
+const apiPath = "/a2a/invoke"
 
 type a2aConfig struct {
 	agentURL string
@@ -51,7 +48,7 @@ func NewLauncher() web.WebSublauncher {
 
 	fs := flag.NewFlagSet("a2a", flag.ContinueOnError)
 
-	fs.StringVar(&config.agentURL, "a2a_agent_url", "localhost:8080", "A2A gRPC host URL as advertised in the public agent card. It is used by A2A clients as a connection endpoint.")
+	fs.StringVar(&config.agentURL, "a2a_agent_url", "http://localhost:8080", "A2A host URL as advertised in the public agent card. It is used by A2A clients as a connection endpoint.")
 
 	return &a2aLauncher{
 		config: config,
@@ -76,64 +73,53 @@ func (a *a2aLauncher) Parse(args []string) ([]string, error) {
 	return restArgs, nil
 }
 
-// WrapHandlers implements web.WebSublauncher. Returns http handler which basing on content-type
-// chooses between a2a grpc handler and provided handler
+// WrapHandlers implements web.WebSublauncher. For API, it doesn't change the top-level routes.
 func (a *a2aLauncher) WrapHandlers(handler http.Handler, adkConfig *adk.Config) http.Handler {
-	grpcSrv := grpc.NewServer()
-	newA2AHandler(adkConfig).RegisterWith(grpcSrv)
-	reflection.Register(grpcSrv)
-	var result http.Handler
-	result = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-			grpcSrv.ServeHTTP(w, r)
-		} else {
-			handler.ServeHTTP(w, r)
-		}
-	})
-	result = h2c.NewHandler(result, &http2.Server{})
-	return result
+	// doesn't change the top level routes
+	return handler
 }
 
 // SimpleDescription implements web.WebSublauncher. For A2A no subrouter definition is needed
-func (a *a2aLauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) {
+func (a *a2aLauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error {
+	publicURL, err := url.JoinPath(a.config.agentURL, apiPath)
+	if err != nil {
+		return err
+	}
+
 	rootAgent := adkConfig.AgentLoader.RootAgent()
 	agentCard := &a2acore.AgentCard{
-		Name:               rootAgent.Name(),
-		Description:        rootAgent.Description(),
-		DefaultInputModes:  []string{"text/plain"},
-		DefaultOutputModes: []string{"text/plain"},
-		URL:                a.config.agentURL,
-		PreferredTransport: a2acore.TransportProtocolGRPC,
-		Skills:             adka2a.BuildAgentSkills(rootAgent),
-		Capabilities:       a2acore.AgentCapabilities{Streaming: true},
-		// gRPC GetAgentCard() method will be serving empty card.
+		Name:                              rootAgent.Name(),
+		Description:                       rootAgent.Description(),
+		DefaultInputModes:                 []string{"text/plain"},
+		DefaultOutputModes:                []string{"text/plain"},
+		URL:                               publicURL,
+		PreferredTransport:                a2acore.TransportProtocolJSONRPC,
+		Skills:                            adka2a.BuildAgentSkills(rootAgent),
+		Capabilities:                      a2acore.AgentCapabilities{Streaming: true},
 		SupportsAuthenticatedExtendedCard: false,
 	}
-	router.Handle("/.well-known/agent-card.json", a2asrv.NewStaticAgentCardHandler(agentCard))
-}
+	router.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(agentCard))
 
-// SimpleDescription implements web.WebSublauncher
-func (a *a2aLauncher) SimpleDescription() string {
-	return "starts A2A server which handles grpc traffic"
-}
-
-// UserMessage implements web.WebSublauncher.
-func (a *a2aLauncher) UserMessage(webUrl string, printer func(v ...any)) {
-	printer(fmt.Sprintf("       a2a:  you can access A2A using grpc protocol: %s", webUrl))
-}
-
-// newA2AHandler creates a new A2A handler from the provided ADK configuration.
-func newA2AHandler(serveConfig *adk.Config) *a2agrpc.Handler {
-	agent := serveConfig.AgentLoader.RootAgent()
+	agent := adkConfig.AgentLoader.RootAgent()
 	executor := adka2a.NewExecutor(adka2a.ExecutorConfig{
 		RunnerConfig: runner.Config{
 			AppName:         agent.Name(),
 			Agent:           agent,
-			SessionService:  serveConfig.SessionService,
-			ArtifactService: serveConfig.ArtifactService,
+			SessionService:  adkConfig.SessionService,
+			ArtifactService: adkConfig.ArtifactService,
 		},
 	})
-	reqHandler := a2asrv.NewHandler(executor, serveConfig.A2AOptions...)
-	grpcHandler := a2agrpc.NewHandler(reqHandler)
-	return grpcHandler
+	reqHandler := a2asrv.NewHandler(executor, adkConfig.A2AOptions...)
+	router.Handle(apiPath, a2asrv.NewJSONRPCHandler(reqHandler))
+	return nil
+}
+
+// SimpleDescription implements web.WebSublauncher
+func (a *a2aLauncher) SimpleDescription() string {
+	return fmt.Sprintf("starts A2A server which handles jsonrpc requests on %s path", apiPath)
+}
+
+// UserMessage implements web.WebSublauncher.
+func (a *a2aLauncher) UserMessage(webUrl string, printer func(v ...any)) {
+	printer(fmt.Sprintf("       a2a:  you can access A2A using jsonrpc protocol: %s", webUrl))
 }

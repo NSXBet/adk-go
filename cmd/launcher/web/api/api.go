@@ -66,10 +66,11 @@ func (a *apiLauncher) UserMessage(webUrl string, printer func(v ...any)) {
 }
 
 // SetupSubrouters adds the API router to the parent router.
-func (a *apiLauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) {
+func (a *apiLauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error {
 	rApi := router.Methods("GET", "POST", "DELETE", "OPTIONS").PathPrefix("/api/").Subrouter()
 	restapiweb.SetupRouter(rApi, adkConfig)
 	rApi.Use(corsWithArgs(a.config.frontendAddress))
+	return nil
 }
 
 // WrapHandlers implements web.WebSublauncher. For API, it doesn't change the top-level routes.

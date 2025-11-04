@@ -68,7 +68,7 @@ type WebSublauncher interface {
 	SimpleDescription() string
 
 	// SetupSubrouters adds sublauncher-specific routes to the router.
-	SetupSubrouters(router *mux.Router, adkConfig *adk.Config)
+	SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error
 	// WrapHandlers allows a sublauncher to wrap the main HTTP handler, for example to add middleware.
 	WrapHandlers(handler http.Handler, adkConfig *adk.Config) http.Handler
 	// UserMessage is a hook for sublaunchers to print a message to the user when the web server starts.
@@ -157,7 +157,9 @@ func (w *Launcher) Run(ctx context.Context, config *adk.Config) error {
 
 	// Setup subrouters
 	for _, l := range w.activeSublaunchers {
-		l.SetupSubrouters(router, config)
+		if err := l.SetupSubrouters(router, config); err != nil {
+			return err
+		}
 	}
 
 	// allow sublaunchers to modify top level handler (needed by a2a)

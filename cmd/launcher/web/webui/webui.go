@@ -71,8 +71,9 @@ func (a *webUILauncher) WrapHandlers(handler http.Handler, adkConfig *adk.Config
 
 // SetupSubrouters implements the web.WebSublauncher interface. It adds the
 // WebUI subrouter to the main router.
-func (w *webUILauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) {
+func (w *webUILauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error {
 	w.AddSubrouter(router, w.config.pathPrefix, adkConfig, w.config.backendAddress)
+	return nil
 }
 
 // SimpleDescription returns a simple description of the WebUI launcher.

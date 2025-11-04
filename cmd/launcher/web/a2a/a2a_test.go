@@ -30,8 +30,6 @@ import (
 	"google.golang.org/adk/cmd/restapi/services"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func getFreePort(t *testing.T) int {
@@ -63,7 +61,7 @@ func TestWebLauncher_ServesA2A(t *testing.T) {
 	launcher := web.NewLauncher(NewLauncher())
 	_, err := launcher.Parse([]string{
 		"--port", strconv.Itoa(port),
-		"a2a", "--a2a_agent_url", "localhost:" + strconv.Itoa(port),
+		"a2a", "--a2a_agent_url", "http://localhost:" + strconv.Itoa(port),
 	})
 	if err != nil {
 		t.Fatalf("web.NewLauncher() error = %v", err)
@@ -96,9 +94,8 @@ func TestWebLauncher_ServesA2A(t *testing.T) {
 
 	var card *a2acore.AgentCard
 	for retry := range 3 {
-		time.Sleep(20 * time.Millisecond) // give server time to start
-		cardResolver := agentcard.Resolver{BaseURL: "http://localhost:" + strconv.Itoa(port)}
-		card, err = cardResolver.Resolve(ctx)
+		time.Sleep(10 * time.Millisecond) // give server time to start
+		card, err = agentcard.DefaultResolver.Resolve(ctx, "http://localhost:"+strconv.Itoa(port))
 		if err == nil {
 			break
 		}
@@ -107,10 +104,7 @@ func TestWebLauncher_ServesA2A(t *testing.T) {
 		}
 	}
 
-	insecureGRPC := a2aclient.WithGRPCTransport(
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	client, err := a2aclient.NewFromCard(ctx, card, insecureGRPC)
+	client, err := a2aclient.NewFromCard(ctx, card)
 	if err != nil {
 		t.Fatalf("a2aclient.NewFromCard() error = %v", err)
 	}
