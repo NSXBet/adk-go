@@ -128,7 +128,7 @@ func createSearchAgent(ctx context.Context) (agent.Agent, error) {
 
 ## 2. Multi-Agent Systems
 
-Complex tasks can be broken down by composing multiple agents. `WorkflowAgents` orchestrate the execution flow of their `sub_agents`.
+Complex tasks can be broken down by composing multiple agents. `WorkflowAgents` orchestrate the execution flow of their `SubAgents`.
 
 ### 2.1. `SequentialAgent`
 
@@ -362,7 +362,7 @@ The ADK provides the following specialized context objects for different situati
         }
         ```
 
-**`agent.ReadonlyContext`**
+2.  **`agent.ReadonlyContext`**
 *   **Where Used:** In scenarios where only read access is needed, like `InstructionProvider` functions.
 *   **Purpose:** Offers a safe, read-only view of `invocation_id`, `agent_name`, and `state`.
 *   **Example:**
@@ -567,6 +567,22 @@ func onAfterModel(ctx agent.CallbackContext, resp *model.LLMResponse, respErr er
 }
 ```
 
+Here's how `onAfterModel` can be passed to an agent:
+
+```go
+	// Create an LLM agent and pass the onAfterModel callback
+	myAgent, err := llmagent.New(llmagent.Config{
+		Name:                "my_llm_agent",
+		Description:         "An agent that tells funny stories instead of jokes.",
+		Model:               mockModel, // Replace with your actual model
+		Instruction:         "You are a helpful assistant.",
+		AfterModelCallbacks: []llmagent.AfterModelCallback{onAfterModel}, // Pass the callback here
+	})
+	if err != nil {
+		log.Fatalf("Failed to create LLM agent: %v", err)
+	}
+```
+
 #### `BeforeToolCallback`
 Runs before a tool is executed. It can modify the arguments passed to the tool by returning a new `map[string]any`. If the returned map is not nil, it replaces the original arguments.
 
@@ -641,10 +657,11 @@ type processDocumentResult struct {
 
 func processDocument(ctx tool.Context, args processDocumentArgs) processDocumentResult {
 	// 1. Load a document from the Artifact service
-	documentPart, err := ctx.Artifacts().Load(ctx, args.DocumentName)
+	loadResp, err := ctx.Artifacts().Load(ctx, args.DocumentName)
 	if err != nil {
 		return processDocumentResult{Status: "error", Message: fmt.Sprintf("Document not found: %v", err)}
 	}
+	_ = loadResp.Part // The loaded document part can be used for analysis.
 
 	// 2. Search memory for related context
 	memoryResp, err := ctx.SearchMemory(ctx, args.AnalysisQuery)
