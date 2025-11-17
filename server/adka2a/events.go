@@ -27,7 +27,8 @@ var (
 	customMetaTaskIDKey    = ToADKMetaKey("task_id")
 	customMetaContextIDKey = ToADKMetaKey("context_id")
 
-	metadataEscalateKey = ToA2AMetaKey("escalate")
+	metadataEscalateKey        = ToA2AMetaKey("escalate")
+	metadataTransferToAgentKey = ToA2AMetaKey("transfer_to_agent")
 )
 
 // NewRemoteAgentEvent create a new Event authored by the agent running in the provided invocation context.
@@ -57,7 +58,7 @@ func EventToMessage(event *session.Event) (*a2a.Message, error) {
 	}
 
 	msg := a2a.NewMessage(role, parts...)
-	msg.Metadata = setEscalateMeta(msg.Metadata, event.Actions.Escalate)
+	msg.Metadata = setActionsMeta(msg.Metadata, event.Actions)
 	return msg, nil
 }
 
@@ -275,5 +276,8 @@ func toEventActions(event a2a.Event) session.EventActions {
 	meta := event.Meta()
 	var result session.EventActions
 	result.Escalate, _ = meta[metadataEscalateKey].(bool)
+	if transferToAgent, ok := meta[metadataTransferToAgentKey].(string); ok {
+		result.TransferToAgent = transferToAgent
+	}
 	return result
 }

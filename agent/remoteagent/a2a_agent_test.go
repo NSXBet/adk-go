@@ -208,6 +208,7 @@ func TestRemoteAgent_ADK2ADK(t *testing.T) {
 		remoteEvents  []*session.Event
 		wantResponses []model.LLMResponse
 		wantEscalate  bool
+		wantTransfer  string
 	}{
 		{
 			name: "text streaming",
@@ -271,6 +272,20 @@ func TestRemoteAgent_ADK2ADK(t *testing.T) {
 			},
 			wantEscalate: true,
 		},
+		{
+			name: "transfer",
+			remoteEvents: []*session.Event{
+				{
+					LLMResponse: model.LLMResponse{Content: genai.NewContentFromText("stop", genai.RoleModel)},
+					Actions:     session.EventActions{TransferToAgent: "a-2"},
+				},
+			},
+			wantResponses: []model.LLMResponse{
+				{Content: genai.NewContentFromText("stop", genai.RoleModel), Partial: true},
+				{TurnComplete: true},
+			},
+			wantTransfer: "a-2",
+		},
 	}
 
 	ignoreFields := []cmp.Option{
@@ -293,7 +308,7 @@ func TestRemoteAgent_ADK2ADK(t *testing.T) {
 			if diff := cmp.Diff(tc.wantResponses, gotResponses, ignoreFields...); diff != "" {
 				t.Fatalf("agent.Run() wrong result (+got,-want):\ngot = %+v\nwant = %+v\ndiff = %s", gotResponses, tc.wantResponses, diff)
 			}
-			lastEscalate := false
+			var lastActions *session.EventActions
 			for _, event := range gotEvents {
 				if _, ok := event.CustomMetadata[adka2a.ToADKMetaKey("response")]; !ok {
 					t.Fatalf("event.CustomMetadata = %v, want meta[%q] = original a2a event", event.CustomMetadata, adka2a.ToADKMetaKey("response"))
@@ -301,10 +316,13 @@ func TestRemoteAgent_ADK2ADK(t *testing.T) {
 				if _, ok := event.CustomMetadata[adka2a.ToADKMetaKey("request")]; !ok {
 					t.Fatalf("event.CustomMetadata = %v, want meta[%q] = original a2a request", event.CustomMetadata, adka2a.ToADKMetaKey("request"))
 				}
-				lastEscalate = event.Actions.Escalate
+				lastActions = &event.Actions
 			}
-			if tc.wantEscalate != lastEscalate {
-				t.Fatalf("last event escalate = %v, want %v", lastEscalate, tc.wantEscalate)
+			if tc.wantEscalate != lastActions.Escalate {
+				t.Fatalf("lastActions.Escalate = %v, want %v", lastActions.Escalate, tc.wantEscalate)
+			}
+			if tc.wantTransfer != lastActions.TransferToAgent {
+				t.Fatalf("lastActions.TransferToAgent = %v, want %v", lastActions.TransferToAgent, tc.wantTransfer)
 			}
 		})
 	}

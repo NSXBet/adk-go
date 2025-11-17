@@ -47,7 +47,7 @@ func TestToSessionEvent(t *testing.T) {
 				Parts:     []a2a.Part{a2a.TextPart{Text: "foo"}},
 				TaskID:    taskID,
 				ContextID: contextID,
-				Metadata:  map[string]any{metadataEscalateKey: true},
+				Metadata:  map[string]any{metadataEscalateKey: true, metadataTransferToAgentKey: "a-2"},
 			},
 			want: &session.Event{
 				LLMResponse: model.LLMResponse{
@@ -59,7 +59,7 @@ func TestToSessionEvent(t *testing.T) {
 				},
 				Author:  agentName,
 				Branch:  branch,
-				Actions: session.EventActions{Escalate: true},
+				Actions: session.EventActions{Escalate: true, TransferToAgent: "a-2"},
 			},
 		},
 		{

@@ -31,10 +31,10 @@ type eventProcessor struct {
 	reqCtx *a2asrv.RequestContext
 	meta   invocationMeta
 
-	// escalate is set to true if event.Actions.Escalate was set on at least one of the events produced during
-	// the agent run. It is then gets passed to caller through with metadata of a terminal event.
+	// terminalActions is used to keep track of escalate and agent transfer actions on processed events.
+	// It is then gets passed to caller through with metadata of a terminal event.
 	// This is done to make sure the caller processes it, since intermediate events without parts might be ignored.
-	escalate bool
+	terminalActions session.EventActions
 
 	// responseID is created once the first TaskArtifactUpdateEvent is sent. Used for subsequent artifact updates.
 	responseID a2a.ArtifactID
@@ -59,7 +59,7 @@ func (p *eventProcessor) process(_ context.Context, event *session.Event) (*a2a.
 		return nil, nil
 	}
 
-	p.escalate = p.escalate || event.Actions.Escalate
+	p.updateTerminalActions(event)
 
 	eventMeta, err := toEventMeta(p.meta, event)
 	if err != nil {
@@ -114,7 +114,7 @@ func (p *eventProcessor) makeTerminalEvents() []a2a.Event {
 
 	for _, s := range []a2a.TaskState{a2a.TaskStateFailed, a2a.TaskStateInputRequired} {
 		if ev, ok := p.terminalEvents[s]; ok {
-			setEscalateMeta(ev.Metadata, p.escalate)
+			ev.Metadata = setActionsMeta(ev.Metadata, p.terminalActions)
 			result = append(result, ev)
 			return result
 		}
@@ -122,7 +122,7 @@ func (p *eventProcessor) makeTerminalEvents() []a2a.Event {
 
 	ev := a2a.NewStatusUpdateEvent(p.reqCtx, a2a.TaskStateCompleted, nil)
 	ev.Final = true
-	ev.Metadata = setEscalateMeta(p.meta.eventMeta, p.escalate)
+	ev.Metadata = setActionsMeta(p.meta.eventMeta, p.terminalActions)
 	result = append(result, ev)
 	return result
 }
@@ -137,6 +137,13 @@ func (p *eventProcessor) makeTaskFailedEvent(cause error, event *session.Event) 
 		}
 	}
 	return toTaskFailedUpdateEvent(p.reqCtx, cause, meta)
+}
+
+func (p *eventProcessor) updateTerminalActions(event *session.Event) {
+	p.terminalActions.Escalate = p.terminalActions.Escalate || event.Actions.Escalate
+	if p.terminalActions.TransferToAgent == "" {
+		p.terminalActions.TransferToAgent = event.Actions.TransferToAgent
+	}
 }
 
 func toTaskFailedUpdateEvent(task a2a.TaskInfoProvider, cause error, meta map[string]any) *a2a.TaskStatusUpdateEvent {

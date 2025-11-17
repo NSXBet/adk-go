@@ -245,24 +245,27 @@ func TestEventProcessor_Process(t *testing.T) {
 			},
 		},
 		{
-			name: "escalate flag passed in completed event meta",
+			name: "actions in completed event meta",
 			events: []*session.Event{
-				{ID: "125", InvocationID: "345", Actions: session.EventActions{Escalate: true}},
+				{ID: "125", InvocationID: "345", Actions: session.EventActions{Escalate: true, TransferToAgent: "a-2"}},
 			},
 			terminal: []a2a.Event{
 				&a2a.TaskStatusUpdateEvent{
 					TaskID:    task.ID,
 					ContextID: task.ContextID,
 					Status:    a2a.TaskStatus{State: a2a.TaskStateCompleted},
-					Metadata:  map[string]any{metadataEscalateKey: true},
+					Metadata:  map[string]any{metadataEscalateKey: true, metadataTransferToAgentKey: "a-2"},
 					Final:     true,
 				},
 			},
 		},
 		{
-			name: "escalate flag not overwritten by non-escalate events",
+			name: "actions not overwritten by subsequent events",
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("The answer is")), Actions: session.EventActions{Escalate: true}},
+				{
+					LLMResponse: modelResponseFromParts(genai.NewPartFromText("The answer is")),
+					Actions:     session.EventActions{Escalate: true, TransferToAgent: "a-2"},
+				},
 				{LLMResponse: model.LLMResponse{ErrorCode: "1", ErrorMessage: "failed"}},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
@@ -272,7 +275,7 @@ func TestEventProcessor_Process(t *testing.T) {
 				newArtifactLastChunkEvent(task),
 				toTaskFailedUpdateEvent(
 					task, errorFromResponse(&model.LLMResponse{ErrorCode: "1", ErrorMessage: "failed"}),
-					map[string]any{ToA2AMetaKey("error_code"): "1", metadataEscalateKey: true},
+					map[string]any{ToA2AMetaKey("error_code"): "1", metadataEscalateKey: true, metadataTransferToAgentKey: "a-2"},
 				),
 			},
 		},
