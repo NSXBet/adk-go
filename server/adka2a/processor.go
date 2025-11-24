@@ -71,7 +71,10 @@ func (p *eventProcessor) process(_ context.Context, event *session.Event) (*a2a.
 	if resp.ErrorCode != "" {
 		// TODO(yarolegovich): consider merging responses if multiple errors can be produced during an invocation
 		if _, ok := p.terminalEvents[a2a.TaskStateFailed]; !ok {
-			p.terminalEvents[a2a.TaskStateFailed] = toTaskFailedUpdateEvent(p.reqCtx, errorFromResponse(&resp), maps.Clone(eventMeta))
+			// terminal event might add additional keys to its metadata when it's dispatched and these changes should
+			// not be reflected in this event's metadata
+			terminalEventMeta := maps.Clone(eventMeta)
+			p.terminalEvents[a2a.TaskStateFailed] = toTaskFailedUpdateEvent(p.reqCtx, errorFromResponse(&resp), terminalEventMeta)
 		}
 	}
 
@@ -123,7 +126,10 @@ func (p *eventProcessor) makeTerminalEvents() []a2a.Event {
 
 	ev := a2a.NewStatusUpdateEvent(p.reqCtx, a2a.TaskStateCompleted, nil)
 	ev.Final = true
-	ev.Metadata = setActionsMeta(maps.Clone(p.meta.eventMeta), p.terminalActions)
+	// we're modifying base processor metadata which might have been sent with one of the previous events.
+	// this update shouldn't be reflected in the sent events' metadata.
+	baseMetaCopy := maps.Clone(p.meta.eventMeta)
+	ev.Metadata = setActionsMeta(baseMetaCopy, p.terminalActions)
 	result = append(result, ev)
 	return result
 }
