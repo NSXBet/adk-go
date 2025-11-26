@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package gcsartifact provides a Google Cloud Storage (GCS) artifact service.
+// Package gcsartifact provides a Google Cloud Storage (GCS) [artifact.Service].
 //
 // This package allows storing and retrieving artifacts in a GCS bucket.
 // Artifacts are organized by application name, user ID, session ID, and filename,
