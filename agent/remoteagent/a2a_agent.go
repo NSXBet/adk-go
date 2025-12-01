@@ -40,7 +40,7 @@ import (
 type BeforeA2ARequestCallback func(ctx agent.CallbackContext, req *a2a.MessageSendParams) (*session.Event, error)
 
 // A2AEventConverter can be used to provide a custome implementation of A2A event transformation logic.
-type A2AEventConverter func(ctx agent.ReadonlyContext, event a2a.Event, err error) (*session.Event, error)
+type A2AEventConverter func(ctx agent.ReadonlyContext, req *a2a.MessageSendParams, event a2a.Event, err error) (*session.Event, error)
 
 // AfterA2ARequestCallback is called after receiving a response from the remote agent and converting it to a session.Event.
 // In streaming responses the callback is invoked for every request. Session event parameter might be nil if conversion logic
@@ -135,8 +135,8 @@ func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*se
 		}
 
 		req := &a2a.MessageSendParams{Message: msg, Config: cfg.MessageSendConfig}
-		if resp, err := runBeforeA2ARequestCallbacks(ctx, cfg, req); resp != nil || err != nil {
-			yield(resp, err)
+		if cbResp, cbErr := runBeforeA2ARequestCallbacks(ctx, cfg, req); cbResp != nil || cbErr != nil {
+			yield(cbResp, cbErr)
 			return
 		}
 
@@ -150,20 +150,21 @@ func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*se
 			return
 		}
 
-		for a2aEvent, err := range client.SendStreamingMessage(ctx, req) {
+		for a2aEvent, a2aErr := range client.SendStreamingMessage(ctx, req) {
+			var err error
 			var event *session.Event
 			if cfg.Converter != nil {
-				event, err = cfg.Converter(icontext.NewReadonlyContext(ctx), a2aEvent, err)
+				event, err = cfg.Converter(icontext.NewReadonlyContext(ctx), req, a2aEvent, a2aErr)
 			} else {
-				event, err = convertToSessionEvent(ctx, req, a2aEvent, err)
+				event, err = convertToSessionEvent(ctx, req, a2aEvent, a2aErr)
 			}
 
-			if resp, err := runAfterA2ARequestCallbacks(ctx, cfg, req, event, err); resp != nil || err != nil {
-				if err != nil {
-					yield(nil, err)
+			if cbResp, cbErr := runAfterA2ARequestCallbacks(ctx, cfg, req, event, err); cbResp != nil || cbErr != nil {
+				if cbErr != nil {
+					yield(nil, cbErr)
 					return
 				}
-				if !yield(resp, nil) {
+				if !yield(cbResp, nil) {
 					return
 				}
 				continue

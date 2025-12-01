@@ -635,14 +635,14 @@ func TestRemoteAgent_RequestCallbacks(t *testing.T) {
 		},
 		{
 			name: "converter error",
-			converter: func(ctx agent.ReadonlyContext, event a2a.Event, err error) (*session.Event, error) {
+			converter: func(ctx agent.ReadonlyContext, req *a2a.MessageSendParams, event a2a.Event, err error) (*session.Event, error) {
 				return nil, fmt.Errorf("failed")
 			},
 			wantErr: fmt.Errorf("failed"),
 		},
 		{
 			name: "converter custom response",
-			converter: func(ctx agent.ReadonlyContext, event a2a.Event, err error) (*session.Event, error) {
+			converter: func(ctx agent.ReadonlyContext, req *a2a.MessageSendParams, event a2a.Event, err error) (*session.Event, error) {
 				return &session.Event{LLMResponse: model.LLMResponse{Content: genai.NewContentFromText("hello", genai.RoleModel)}}, nil
 			},
 			wantResponses: []model.LLMResponse{{Content: genai.NewContentFromText("hello", genai.RoleModel)}},
