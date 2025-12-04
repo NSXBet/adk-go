@@ -81,6 +81,7 @@ type eventIndex struct{ i int }
 
 func TestExecutor_Execute(t *testing.T) {
 	task := &a2a.Task{ID: a2a.NewTaskID(), ContextID: a2a.NewContextID()}
+	hiMsg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "hi"})
 	hiMsgForTask := a2a.NewMessageForTask(a2a.MessageRoleUser, task, a2a.TextPart{Text: "hi"})
 
 	testCases := []struct {
@@ -118,13 +119,13 @@ func TestExecutor_Execute(t *testing.T) {
 		},
 		{
 			name:    "success for a new task",
-			request: &a2a.MessageSendParams{Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "hi"})},
+			request: &a2a.MessageSendParams{Message: hiMsg},
 			events: []*session.Event{
 				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
 				{LLMResponse: modelResponseFromParts(genai.NewPartFromText(", world!"))},
 			},
 			wantEvents: []a2a.Event{
-				a2a.NewStatusUpdateEvent(task, a2a.TaskStateSubmitted, nil),
+				a2a.NewSubmittedTask(task, hiMsg),
 				a2a.NewStatusUpdateEvent(task, a2a.TaskStateWorking, nil),
 				a2a.NewArtifactEvent(task, a2a.TextPart{Text: "Hello"}),
 				a2a.NewArtifactUpdateEvent(task, a2a.NewArtifactID(), a2a.TextPart{Text: ", world!"}),

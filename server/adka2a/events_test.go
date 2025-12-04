@@ -129,7 +129,7 @@ func TestToSessionEvent(t *testing.T) {
 			},
 		},
 		{
-			name: "task with no parts",
+			name: "terminal task with no parts",
 			input: &a2a.Task{
 				ID:        taskID,
 				ContextID: contextID,
@@ -145,6 +145,15 @@ func TestToSessionEvent(t *testing.T) {
 				Author: agentName,
 				Branch: branch,
 			},
+		},
+		{
+			name: "non-terminal task with no parts",
+			input: &a2a.Task{
+				ID:        taskID,
+				ContextID: contextID,
+				Status:    a2a.TaskStatus{State: a2a.TaskStateSubmitted},
+			},
+			want: nil,
 		},
 		{
 			name: "task in input required",

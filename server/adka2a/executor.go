@@ -71,7 +71,7 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	}
 
 	if reqCtx.StoredTask == nil {
-		event := a2a.NewStatusUpdateEvent(reqCtx, a2a.TaskStateSubmitted, nil)
+		event := a2a.NewSubmittedTask(reqCtx, msg)
 		if err := queue.Write(ctx, event); err != nil {
 			return fmt.Errorf("failed to setup a task: %w", err)
 		}

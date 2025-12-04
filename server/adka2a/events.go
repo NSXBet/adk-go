@@ -208,6 +208,11 @@ func taskToEvent(ctx agent.InvocationContext, task *a2a.Task) (*session.Event, e
 		longRunningToolIDs = append(longRunningToolIDs, lrtIDs...)
 	}
 
+	notTerminal := !task.Status.State.Terminal() && task.Status.State != a2a.TaskStateInputRequired
+	if len(parts) == 0 && notTerminal {
+		return nil, nil
+	}
+
 	event := NewRemoteAgentEvent(ctx)
 	if len(parts) > 0 {
 		event.Content = genai.NewContentFromParts(parts, genai.RoleModel)
@@ -216,9 +221,7 @@ func taskToEvent(ctx agent.InvocationContext, task *a2a.Task) (*session.Event, e
 	if task.Status.State == a2a.TaskStateInputRequired {
 		event.LongRunningToolIDs = longRunningToolIDs
 	}
-	if !task.Status.State.Terminal() && task.Status.State != a2a.TaskStateInputRequired {
-		event.Partial = true
-	}
+	event.Partial = notTerminal
 	event.Actions = toEventActions(task)
 	return event, nil
 }
