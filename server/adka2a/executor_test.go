@@ -77,6 +77,16 @@ func newEventReplayAgent(events []*session.Event, failWith error) (agent.Agent, 
 	})
 }
 
+func newInMemoryQueue(t *testing.T) eventqueue.Queue {
+	t.Helper()
+	qm := eventqueue.NewInMemoryManager()
+	q, err := qm.GetOrCreate(t.Context(), "test")
+	if err != nil {
+		t.Fatalf("qm.GetOrCreate() error = %v", err)
+	}
+	return q
+}
+
 type eventIndex struct{ i int }
 
 func TestExecutor_Execute(t *testing.T) {
@@ -222,7 +232,7 @@ func TestExecutor_Execute(t *testing.T) {
 			sessionService := &testSessionService{Service: session.InMemoryService(), createErr: tc.createSessionFails}
 			runnerConfig := runner.Config{AppName: agent.Name(), Agent: agent, SessionService: sessionService}
 			executor := NewExecutor(ExecutorConfig{RunnerConfig: runnerConfig})
-			queue := &testQueue{Queue: eventqueue.NewInMemoryQueue(10), writeErr: tc.queueWriteFails}
+			queue := &testQueue{Queue: newInMemoryQueue(t), writeErr: tc.queueWriteFails}
 			reqCtx := &a2asrv.RequestContext{TaskID: task.ID, ContextID: task.ContextID, Message: tc.request.Message}
 			if tc.request.Message != nil && tc.request.Message.TaskID == task.ID {
 				reqCtx.StoredTask = task
@@ -249,7 +259,7 @@ func TestExecutor_Cancel(t *testing.T) {
 	executor := NewExecutor(ExecutorConfig{})
 	reqCtx := &a2asrv.RequestContext{TaskID: task.ID, ContextID: task.ContextID}
 
-	queue := &testQueue{Queue: eventqueue.NewInMemoryQueue(10)}
+	queue := &testQueue{Queue: newInMemoryQueue(t)}
 
 	reqCtx.StoredTask = task
 	err := executor.Cancel(t.Context(), reqCtx, queue)
@@ -279,7 +289,7 @@ func TestExecutor_SessionReuse(t *testing.T) {
 	runnerConfig := runner.Config{AppName: agent.Name(), Agent: agent, SessionService: sessionService}
 	config := ExecutorConfig{RunnerConfig: runnerConfig}
 	executor := NewExecutor(config)
-	queue := eventqueue.NewInMemoryQueue(100)
+	queue := newInMemoryQueue(t)
 
 	err = executor.Execute(ctx, reqCtx, queue)
 	if err != nil {
@@ -370,7 +380,7 @@ func TestExecutor_AfterEventCallback(t *testing.T) {
 				RunnerConfig:       runnerConfig,
 				AfterEventCallback: tc.afterEvent,
 			})
-			queue := &testQueue{Queue: eventqueue.NewInMemoryQueue(10)}
+			queue := &testQueue{Queue: newInMemoryQueue(t)}
 			reqCtx := &a2asrv.RequestContext{TaskID: task.ID, ContextID: task.ContextID, Message: hiMsg, StoredTask: task}
 
 			err = executor.Execute(t.Context(), reqCtx, queue)
