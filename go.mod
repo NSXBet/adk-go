@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	golang.org/x/sync v0.18.0
 	google.golang.org/api v0.252.0
-	google.golang.org/genai v1.36.0
+	google.golang.org/genai v1.40.0
 	rsc.io/omap v1.2.0
 	rsc.io/ordered v1.1.1
 )
@@ -40,7 +40,7 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.30.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.53.0 // indirect
-	github.com/a2aproject/a2a-go v0.3.0
+	github.com/a2aproject/a2a-go v0.3.3
 	github.com/awalterschulze/gographviz v2.0.3+incompatible
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20251014123835-2ee22ca58382 // indirect
