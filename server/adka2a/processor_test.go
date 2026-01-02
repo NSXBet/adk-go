@@ -305,9 +305,10 @@ func TestEventProcessor_Process(t *testing.T) {
 		{
 			name: "partial events parts marked",
 			events: []*session.Event{
-				{LLMResponse: modelPartialResponseFromParts(
-					genai.NewPartFromText("The answer is"),
-					genai.NewPartFromExecutableCode("get_the_answer()", genai.LanguagePython)),
+				{
+					LLMResponse: modelPartialResponseFromParts(
+						genai.NewPartFromText("The answer is"),
+						genai.NewPartFromExecutableCode("get_the_answer()", genai.LanguagePython)),
 				},
 				{LLMResponse: modelPartialResponseFromParts(
 					genai.NewPartFromCodeExecutionResult(genai.OutcomeOK, "42"),
