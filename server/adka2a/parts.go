@@ -89,6 +89,9 @@ func updatePartsMetadata(parts []a2a.Part, update map[string]any) {
 				parts[i] = p
 			}
 			meta = p.Metadata
+		default:
+			// TODO: log unknown part type warning (should never happen)
+			continue
 		}
 		maps.Copy(meta, update)
 	}
