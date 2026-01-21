@@ -129,7 +129,7 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, msg *genai.C
 
 		storedSession := resp.Session
 
-		agentToRun, err := r.findAgentToRun(storedSession)
+		agentToRun, err := r.findAgentToRun(storedSession, msg)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -288,8 +288,8 @@ func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSessi
 
 // findAgentToRun returns the agent that should handle the next request based on
 // session history.
-func (r *Runner) findAgentToRun(session session.Session) (agent.Agent, error) {
-	if event := handleUserFunctionCallResponse(session.Events()); event != nil {
+func (r *Runner) findAgentToRun(session session.Session, msg *genai.Content) (agent.Agent, error) {
+	if event := handleUserFunctionCallResponse(session.Events(), msg); event != nil {
 		subAgent := findAgent(r.rootAgent, event.Author)
 		if subAgent != nil {
 			return subAgent, nil
@@ -323,23 +323,18 @@ func (r *Runner) findAgentToRun(session session.Session) (agent.Agent, error) {
 
 // handleUserFunctionCallResponse finds the function call event that matches the function response id
 // delivered by the user in the latest event.
-func handleUserFunctionCallResponse(events session.Events) *session.Event {
+func handleUserFunctionCallResponse(events session.Events, msg *genai.Content) *session.Event {
 	if events.Len() == 0 {
 		return nil
 	}
 
-	lastEvent := events.At(events.Len() - 1)
-	if lastEvent.Author != "user" {
-		return nil
-	}
-
-	functionResponses := utils.FunctionResponses(lastEvent.Content)
+	functionResponses := utils.FunctionResponses(msg)
 	if len(functionResponses) == 0 {
 		return nil
 	}
 
 	callID := functionResponses[0].ID
-	for i := events.Len() - 2; i >= 0; i-- {
+	for i := events.Len() - 1; i >= 0; i-- {
 		event := events.At(i)
 		for _, part := range utils.FunctionCalls(event.Content) {
 			if part.ID == callID {
