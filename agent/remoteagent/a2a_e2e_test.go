@@ -92,7 +92,6 @@ func TestA2AInputRequired(t *testing.T) {
 	if len(task1.Artifacts) != 1 {
 		t.Fatalf("len(task.Artifacts) = %d, want 1", len(task1.Artifacts))
 	}
-	print(task1.Artifacts[0].Parts)
 
 	// Incomplete followup keeps the task in input-required
 	incompleteFollowupText := "Is it really necessary?"
@@ -265,20 +264,16 @@ func newInputRequestingAgent(t *testing.T, name string) agent.Agent {
 				return func(yield func(*model.LLMResponse, error) bool) {
 					lastMessage := req.Contents[len(req.Contents)-1]
 					_, approvalResult := findLongRunningCall(t, lastMessage.Parts)
-					fmt.Println(approvalResult)
 					var content *genai.Content
 					switch {
 					case approvalResult == nil: // the first model invocation - invoke a long running tool
-						fmt.Println("emit: request")
 						content = genai.NewContentFromParts([]*genai.Part{
 							genai.NewPartFromText(modelTextRequiresApproval),
 							genai.NewPartFromFunctionCall(approvalToolName, map[string]any{}),
 						}, genai.RoleModel)
 					case approvalResult.Response["status"] != ticketStatusApproved: // the tool returned a pending result
-						fmt.Println("emit: wait")
 						content = genai.NewContentFromText(modelTextWaitingForApproval, genai.RoleModel)
 					default: // user approval is in the session
-						fmt.Println("emit: success")
 						content = genai.NewContentFromText(modelTextTaskComplete, genai.RoleModel)
 					}
 					yield(&model.LLMResponse{Content: content}, nil)

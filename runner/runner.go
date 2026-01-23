@@ -333,6 +333,9 @@ func handleUserFunctionCallResponse(events session.Events, msg *genai.Content) *
 		return nil
 	}
 
+	// This assumes that even if user provides multiple function responses, all the function calls
+	// were made by the same agent. Otherwise it would be impossible to rearrange session events
+	// such that every function response has a corresponding call filtering by author.
 	callID := functionResponses[0].ID
 	for i := events.Len() - 1; i >= 0; i-- {
 		event := events.At(i)
