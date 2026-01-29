@@ -110,7 +110,13 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	if err != nil {
 		return fmt.Errorf("a2a message conversion failed: %w", err)
 	}
-	r, err := runner.New(e.config.RunnerConfig)
+
+	runnerCfg, executorPlugin, err := withExecutorPlugin(e.config.RunnerConfig)
+	if err != nil {
+		return fmt.Errorf("failed to install a2a-executor plugin: %w", err)
+	}
+
+	r, err := runner.New(runnerCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create a runner: %w", err)
 	}
@@ -137,10 +143,10 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 
 	invocationMeta := toInvocationMeta(ctx, e.config, reqCtx)
 
-	session, err := e.prepareSession(ctx, invocationMeta)
+	err = e.prepareSession(ctx, invocationMeta)
 	if err != nil {
 		event := toTaskFailedUpdateEvent(reqCtx, err, invocationMeta.eventMeta)
-		execCtx := newExecutorContext(ctx, invocationMeta, emptySessionState{}, content)
+		execCtx := newExecutorContext(ctx, invocationMeta, executorPlugin, content)
 		return e.writeFinalTaskStatus(execCtx, queue, event, err)
 	}
 
@@ -151,7 +157,7 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	}
 
 	processor := newEventProcessor(reqCtx, invocationMeta, e.config.GenAIPartConverter)
-	executorContext := newExecutorContext(ctx, invocationMeta, session.State(), content)
+	executorContext := newExecutorContext(ctx, invocationMeta, executorPlugin, content)
 	return e.process(executorContext, r, processor, queue)
 }
 
@@ -162,7 +168,7 @@ func (e *Executor) Cancel(ctx context.Context, reqCtx *a2asrv.RequestContext, qu
 }
 
 // Processing failures should be delivered as Task failed events. An error is returned from this method if an event write fails.
-func (e *Executor) process(ctx ExecutorContext, r *runner.Runner, processor *eventProcessor, q eventqueue.Queue) error {
+func (e *Executor) process(ctx *executorContext, r *runner.Runner, processor *eventProcessor, q eventqueue.Queue) error {
 	meta := processor.meta
 	for adkEvent, adkErr := range r.Run(ctx, meta.userID, meta.sessionID, ctx.UserContent(), e.config.RunConfig) {
 		if adkErr != nil {
@@ -209,26 +215,26 @@ func (e *Executor) writeFinalTaskStatus(ctx ExecutorContext, queue eventqueue.Qu
 	return nil
 }
 
-func (e *Executor) prepareSession(ctx context.Context, meta invocationMeta) (session.Session, error) {
+func (e *Executor) prepareSession(ctx context.Context, meta invocationMeta) error {
 	service := e.config.RunnerConfig.SessionService
 
-	getResp, err := service.Get(ctx, &session.GetRequest{
+	_, err := service.Get(ctx, &session.GetRequest{
 		AppName:   e.config.RunnerConfig.AppName,
 		UserID:    meta.userID,
 		SessionID: meta.sessionID,
 	})
 	if err == nil {
-		return getResp.Session, nil
+		return nil
 	}
 
-	createResp, err := service.Create(ctx, &session.CreateRequest{
+	_, err = service.Create(ctx, &session.CreateRequest{
 		AppName:   e.config.RunnerConfig.AppName,
 		UserID:    meta.userID,
 		SessionID: meta.sessionID,
 		State:     make(map[string]any),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create a session: %w", err)
+		return fmt.Errorf("failed to create a session: %w", err)
 	}
-	return createResp.Session, nil
+	return nil
 }
