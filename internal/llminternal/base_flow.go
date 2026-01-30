@@ -20,6 +20,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"sync"
 
 	"google.golang.org/genai"
 
@@ -363,52 +364,99 @@ func findLongRunningFunctionCallIDs(c *genai.Content, tools map[string]tool.Tool
 	return slices.Collect(maps.Keys(set))
 }
 
+// toolCallResult holds the result of a single tool call execution.
+type toolCallResult struct {
+	index int
+	event *session.Event
+	err   error
+}
+
 // handleFunctionCalls calls the functions and returns the function response event.
+// Tool calls are executed in parallel using goroutines for improved performance.
 //
 // TODO: accept filters to include/exclude function calls.
-// TODO: check feasibility of running tool.Run concurrently.
 func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[string]tool.Tool, resp *model.LLMResponse) (*session.Event, error) {
-	var fnResponseEvents []*session.Event
-
 	fnCalls := utils.FunctionCalls(resp.Content)
-	for _, fnCall := range fnCalls {
-		curTool, ok := toolsDict[fnCall.Name]
-		if !ok {
-			return nil, fmt.Errorf("unknown tool: %q", fnCall.Name)
-		}
-		funcTool, ok := curTool.(toolinternal.FunctionTool)
-		if !ok {
-			return nil, fmt.Errorf("tool %q is not a function tool", curTool.Name())
-		}
-		toolCtx := toolinternal.NewToolContext(ctx, fnCall.ID, &session.EventActions{StateDelta: make(map[string]any)})
-		// toolCtx := tool.
-		spans := telemetry.StartTrace(ctx, "execute_tool "+fnCall.Name)
+	if len(fnCalls) == 0 {
+		return nil, nil
+	}
 
-		result := f.callTool(funcTool, fnCall.Args, toolCtx)
+	// Use a channel to collect results safely from goroutines
+	resultsChan := make(chan toolCallResult, len(fnCalls))
+	var wg sync.WaitGroup
 
-		// TODO: agent.canonical_after_tool_callbacks
-		// TODO: handle long-running tool.
-		ev := session.NewEvent(ctx.InvocationID())
-		ev.LLMResponse = model.LLMResponse{
-			Content: &genai.Content{
-				Role: "user",
-				Parts: []*genai.Part{
-					{
-						FunctionResponse: &genai.FunctionResponse{
-							ID:       fnCall.ID,
-							Name:     fnCall.Name,
-							Response: result,
+	// Execute all tool calls in parallel
+	for i, fnCall := range fnCalls {
+		wg.Add(1)
+		go func(idx int, fc *genai.FunctionCall) {
+			defer wg.Done()
+
+			curTool, ok := toolsDict[fc.Name]
+			if !ok {
+				resultsChan <- toolCallResult{index: idx, err: fmt.Errorf("unknown tool: %q", fc.Name)}
+				return
+			}
+			funcTool, ok := curTool.(toolinternal.FunctionTool)
+			if !ok {
+				resultsChan <- toolCallResult{index: idx, err: fmt.Errorf("tool %q is not a function tool", curTool.Name())}
+				return
+			}
+
+			// Create isolated tool context for this goroutine
+			toolCtx := toolinternal.NewToolContext(ctx, fc.ID, &session.EventActions{StateDelta: make(map[string]any)})
+			spans := telemetry.StartTrace(ctx, "execute_tool "+fc.Name)
+
+			result := f.callTool(funcTool, fc.Args, toolCtx)
+
+			// TODO: agent.canonical_after_tool_callbacks
+			// TODO: handle long-running tool.
+			ev := session.NewEvent(ctx.InvocationID())
+			ev.LLMResponse = model.LLMResponse{
+				Content: &genai.Content{
+					Role: "user",
+					Parts: []*genai.Part{
+						{
+							FunctionResponse: &genai.FunctionResponse{
+								ID:       fc.ID,
+								Name:     fc.Name,
+								Response: result,
+							},
 						},
 					},
 				},
-			},
-		}
-		ev.Author = ctx.Agent().Name()
-		ev.Branch = ctx.Branch()
-		ev.Actions = *toolCtx.Actions()
-		telemetry.TraceToolCall(spans, curTool, fnCall.Args, ev)
-		fnResponseEvents = append(fnResponseEvents, ev)
+			}
+			ev.Author = ctx.Agent().Name()
+			ev.Branch = ctx.Branch()
+			ev.Actions = *toolCtx.Actions()
+			telemetry.TraceToolCall(spans, curTool, fc.Args, ev)
+
+			resultsChan <- toolCallResult{index: idx, event: ev}
+		}(i, fnCall)
 	}
+
+	// Close channel after all goroutines complete
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results from channel and maintain original order
+	results := make([]*session.Event, len(fnCalls))
+	for r := range resultsChan {
+		if r.err != nil {
+			return nil, r.err
+		}
+		results[r.index] = r.event
+	}
+
+	// Filter out any nil events (shouldn't happen, but safety check)
+	fnResponseEvents := make([]*session.Event, 0, len(results))
+	for _, ev := range results {
+		if ev != nil {
+			fnResponseEvents = append(fnResponseEvents, ev)
+		}
+	}
+
 	mergedEvent, err := mergeParallelFunctionResponseEvents(fnResponseEvents)
 	if err != nil {
 		return mergedEvent, err
