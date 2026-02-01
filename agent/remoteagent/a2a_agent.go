@@ -20,6 +20,7 @@ import (
 	"iter"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/a2aproject/a2a-go/a2a"
 	"github.com/a2aproject/a2a-go/a2aclient"
@@ -119,18 +120,29 @@ func NewA2A(cfg A2AConfig) (agent.Agent, error) {
 
 type a2aAgent struct {
 	resolvedCard *a2a.AgentCard
+	cardOnce     sync.Once
+	cardErr      error
 }
 
 func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
-		card, err := resolveAgentCard(ctx, cfg)
-		if err != nil {
-			yield(toErrorEvent(ctx, fmt.Errorf("agent card resolution failed: %w", err)), nil)
+		// Thread-safe card resolution using sync.Once
+		// This ensures the card is resolved exactly once even with parallel calls
+		a.cardOnce.Do(func() {
+			if a.resolvedCard == nil {
+				a.resolvedCard, a.cardErr = resolveAgentCard(ctx, cfg)
+			}
+		})
+
+		if a.cardErr != nil {
+			yield(toErrorEvent(ctx, fmt.Errorf("agent card resolution failed: %w", a.cardErr)), nil)
 			return
 		}
-		a.resolvedCard = card
+
+		card := a.resolvedCard
 
 		var client *a2aclient.Client
+		var err error
 		if cfg.ClientFactory != nil {
 			client, err = cfg.ClientFactory.CreateFromCard(ctx, card)
 		} else {
