@@ -22,6 +22,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"google.golang.org/genai"
@@ -552,15 +553,24 @@ Suggested fixes:
   - Check for typos in function name`, toolName, joinedTools)
 }
 
+// toolCallResult holds the result of a single tool call execution.
+type toolCallResult struct {
+	event *session.Event
+	err   error
+}
+
 // handleFunctionCalls calls the functions and returns the function response event.
+// Tool calls are executed in parallel using goroutines for improved performance.
 //
 // TODO: accept filters to include/exclude function calls.
-// TODO: check feasibility of running tool.Run concurrently.
 func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[string]tool.Tool, resp *model.LLMResponse, toolConfirmations map[string]*toolconfirmation.ToolConfirmation) (mergedEvent *session.Event, err error) {
-	var fnResponseEvents []*session.Event
 	fnCalls := utils.FunctionCalls(resp.Content)
+	if len(fnCalls) == 0 {
+		return nil, nil
+	}
+
 	toolNames := slices.Collect(maps.Keys(toolsDict))
-	var result map[string]any
+
 	// Merged span for parallel tool calls - create only if there is more than one tool call.
 	if len(fnCalls) > 1 {
 		mergedCtx, mergedToolCallSpan := telemetry.StartTrace(ctx, "execute_tool (merged)")
@@ -570,36 +580,45 @@ func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[st
 			mergedToolCallSpan.End()
 		}()
 	}
-	for _, fnCall := range fnCalls {
-		// Wrap function calls in anonymous func to limit the scope of the span.
-		func() {
+
+	// Execute all tool calls in parallel, maintaining original order via indexed results.
+	results := make([]toolCallResult, len(fnCalls))
+	var wg sync.WaitGroup
+
+	for i, fnCall := range fnCalls {
+		wg.Add(1)
+		go func(idx int, fc *genai.FunctionCall) {
+			defer wg.Done()
+
 			sctx, span := telemetry.StartExecuteToolSpan(ctx, telemetry.StartExecuteToolSpanParams{
-				ToolName: fnCall.Name,
-				Args:     fnCall.Args,
+				ToolName: fc.Name,
+				Args:     fc.Args,
 			})
 			defer span.End()
 			toolCallCtx := ctx.WithContext(sctx)
+
 			var confirmation *toolconfirmation.ToolConfirmation
 			if toolConfirmations != nil {
-				confirmation = toolConfirmations[fnCall.ID]
+				confirmation = toolConfirmations[fc.ID]
 			}
-			toolCtx := toolinternal.NewToolContext(toolCallCtx, fnCall.ID, &session.EventActions{StateDelta: make(map[string]any)}, confirmation)
+			toolCtx := toolinternal.NewToolContext(toolCallCtx, fc.ID, &session.EventActions{StateDelta: make(map[string]any)}, confirmation)
 
-			curTool, found := toolsDict[fnCall.Name]
+			var result map[string]any
+			curTool, found := toolsDict[fc.Name]
 			if !found {
-				err := newToolNotFoundError(fnCall.Name, toolNames)
-				result, err = f.runOnToolErrorCallbacks(toolCtx, &fakeTool{name: fnCall.Name}, fnCall.Args, err)
-				if err != nil {
-					result = map[string]any{"error": err.Error()}
+				toolErr := newToolNotFoundError(fc.Name, toolNames)
+				result, toolErr = f.runOnToolErrorCallbacks(toolCtx, &fakeTool{name: fc.Name}, fc.Args, toolErr)
+				if toolErr != nil {
+					result = map[string]any{"error": toolErr.Error()}
 				}
 			} else if funcTool, ok := curTool.(toolinternal.FunctionTool); !ok {
-				err := newToolNotFoundError(fnCall.Name, toolNames)
-				result, err = f.runOnToolErrorCallbacks(toolCtx, &fakeTool{name: fnCall.Name}, fnCall.Args, err)
-				if err != nil {
-					result = map[string]any{"error": err.Error()}
+				toolErr := newToolNotFoundError(fc.Name, toolNames)
+				result, toolErr = f.runOnToolErrorCallbacks(toolCtx, &fakeTool{name: fc.Name}, fc.Args, toolErr)
+				if toolErr != nil {
+					result = map[string]any{"error": toolErr.Error()}
 				}
 			} else {
-				result = f.callTool(toolCtx, funcTool, fnCall.Args)
+				result = f.callTool(toolCtx, funcTool, fc.Args)
 			}
 
 			// TODO: handle long-running tool.
@@ -610,8 +629,8 @@ func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[st
 					Parts: []*genai.Part{
 						{
 							FunctionResponse: &genai.FunctionResponse{
-								ID:       fnCall.ID,
-								Name:     fnCall.Name,
+								ID:       fc.ID,
+								Name:     fc.Name,
 								Response: result,
 							},
 						},
@@ -624,13 +643,13 @@ func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[st
 
 			traceTool := curTool
 			if traceTool == nil {
-				traceTool = &fakeTool{name: fnCall.Name}
+				traceTool = &fakeTool{name: fc.Name}
 			}
 			var toolErr error
 			resultErr := result["error"]
 			if resultErr != nil {
-				if err, ok := resultErr.(error); ok {
-					toolErr = err
+				if e, ok := resultErr.(error); ok {
+					toolErr = e
 				} else if errStr, ok := resultErr.(string); ok {
 					toolErr = errors.New(errStr)
 				}
@@ -641,9 +660,23 @@ func (f *Flow) handleFunctionCalls(ctx agent.InvocationContext, toolsDict map[st
 				Error:         toolErr,
 			})
 
-			fnResponseEvents = append(fnResponseEvents, ev)
-		}()
+			results[idx] = toolCallResult{event: ev}
+		}(i, fnCall)
 	}
+
+	wg.Wait()
+
+	// Check for errors and collect events in original order.
+	fnResponseEvents := make([]*session.Event, 0, len(results))
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
+		}
+		if r.event != nil {
+			fnResponseEvents = append(fnResponseEvents, r.event)
+		}
+	}
+
 	mergedEvent, err = mergeParallelFunctionResponseEvents(fnResponseEvents)
 	if err != nil {
 		return mergedEvent, err
