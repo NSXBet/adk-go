@@ -26,14 +26,14 @@ import (
 )
 
 type inputRequiredProcessor struct {
-	reqCtx *a2asrv.RequestContext
-	event  *a2a.TaskStatusUpdateEvent
+	execCtx *a2asrv.ExecutorContext
+	event   *a2a.TaskStatusUpdateEvent
 	// handles possible duplication in partial and non-partial events
 	addedParts []*genai.Part
 }
 
-func newInputRequiredProcessor(reqCtx *a2asrv.RequestContext) *inputRequiredProcessor {
-	return &inputRequiredProcessor{reqCtx: reqCtx}
+func newInputRequiredProcessor(execCtx *a2asrv.ExecutorContext) *inputRequiredProcessor {
+	return &inputRequiredProcessor{execCtx: execCtx}
 }
 
 // process handles long-running function tool calls by accumulating them for the final task status update.
@@ -84,8 +84,7 @@ func (p *inputRequiredProcessor) process(event *session.Event) (*session.Event, 
 			p.event.Status.Message.Parts = append(p.event.Status.Message.Parts, a2aParts...)
 		} else {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2aParts...)
-			ev := a2a.NewStatusUpdateEvent(p.reqCtx, a2a.TaskStateInputRequired, msg)
-			ev.Final = true
+			ev := a2a.NewStatusUpdateEvent(p.execCtx, a2a.TaskStateInputRequired, msg)
 			p.event = ev
 		}
 	}
@@ -113,11 +112,13 @@ func (p *inputRequiredProcessor) isLongRunningResponse(event *session.Event, par
 	if p.event == nil {
 		return false
 	}
-	for _, part := range p.event.Status.Message.Parts {
-		if dp, ok := part.(a2a.DataPart); ok {
-			if typeVal, ok := dp.Metadata[a2aDataPartMetaTypeKey]; ok && typeVal == a2aDataPartTypeFunctionCall {
-				if callID, ok := dp.Data["id"].(string); ok && callID == id {
-					return true
+	for _, msgPart := range p.event.Status.Message.Parts {
+		if msgPart.Data() != nil {
+			if typeVal, ok := msgPart.Metadata[a2aDataPartMetaTypeKey]; ok && typeVal == a2aDataPartTypeFunctionCall {
+				if data, ok := msgPart.Data().(map[string]any); ok {
+					if callID, ok := data["id"].(string); ok && callID == id {
+						return true
+					}
 				}
 			}
 		}
@@ -128,11 +129,11 @@ func (p *inputRequiredProcessor) isLongRunningResponse(event *session.Event, par
 // handleInputRequired checks if the input message contains responses to all function calls
 // that happened during the previous invocation and were recorded in the Task input-required state message.
 // If a non-nil event is returned the invoking code needs to use the event as the result of the execution
-func handleInputRequired(reqCtx *a2asrv.RequestContext, content *genai.Content) (*a2a.TaskStatusUpdateEvent, error) {
-	if reqCtx.StoredTask == nil {
+func handleInputRequired(execCtx *a2asrv.ExecutorContext, content *genai.Content) (*a2a.TaskStatusUpdateEvent, error) {
+	if execCtx.StoredTask == nil {
 		return nil, nil
 	}
-	task, statusMsg := reqCtx.StoredTask, reqCtx.StoredTask.Status.Message
+	task, statusMsg := execCtx.StoredTask, execCtx.StoredTask.Status.Message
 	if task.Status.State != a2a.TaskStateInputRequired || statusMsg == nil {
 		return nil, nil
 	}
@@ -151,24 +152,21 @@ func handleInputRequired(reqCtx *a2asrv.RequestContext, content *genai.Content) 
 		})
 		if !hasMatchingResponse {
 			parts := makeInputMissingErrorMessage(statusMsg.Parts, statusPart.FunctionCall.ID)
-			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, reqCtx.StoredTask, parts...)
-			event := a2a.NewStatusUpdateEvent(reqCtx, a2a.TaskStateInputRequired, msg)
-			event.Final = true
+			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx.StoredTask, parts...)
+			event := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateInputRequired, msg)
 			return event, nil
 		}
 	}
 	return nil, nil
 }
 
-func makeInputMissingErrorMessage(inputRequiredParts []a2a.Part, callID string) []a2a.Part {
-	errPart := a2a.TextPart{
-		Text:     fmt.Sprintf("no input provided for function call ID %q", callID),
-		Metadata: map[string]any{"validation_error": true},
-	}
-	var preservedParts []a2a.Part
+func makeInputMissingErrorMessage(inputRequiredParts []*a2a.Part, callID string) []*a2a.Part {
+	errPart := a2a.NewTextPart(fmt.Sprintf("no input provided for function call ID %q", callID))
+	errPart.Metadata = map[string]any{"validation_error": true}
+	var preservedParts []*a2a.Part
 	for _, p := range inputRequiredParts {
-		if meta := p.Meta(); meta != nil {
-			if v, ok := meta["validation_error"].(bool); ok && v {
+		if p.Metadata != nil {
+			if v, ok := p.Metadata["validation_error"].(bool); ok && v {
 				continue
 			}
 		}

@@ -92,10 +92,10 @@ func TestA2AInputRequired(t *testing.T) {
 				return createLongRunningToolApproval(t, pendingResponse)
 			},
 			wantFirstArtifactParts: a2a.ContentParts{
-				a2a.TextPart{Text: modelTextRequiresApproval},
-				a2a.TextPart{Text: modelTextWaitingForApproval},
+				a2a.NewTextPart(modelTextRequiresApproval),
+				a2a.NewTextPart(modelTextWaitingForApproval),
 			},
-			wantSecondArtifactParts: a2a.ContentParts{a2a.TextPart{Text: modelTextTaskComplete}},
+			wantSecondArtifactParts: a2a.ContentParts{a2a.NewTextPart(modelTextTaskComplete)},
 		},
 		{
 			name: "tool confirmation",
@@ -104,28 +104,31 @@ func TestA2AInputRequired(t *testing.T) {
 				return createToolConfirmationApproval(t, toolCall)
 			},
 			wantFirstArtifactParts: a2a.ContentParts{
-				a2a.TextPart{Text: modelTextRequiresApproval},
-				a2a.DataPart{
-					Data:     map[string]any{"name": approvalToolName},
-					Metadata: map[string]any{"adk_is_long_running": false, "adk_type": "function_call"},
-				},
-				a2a.DataPart{
-					Data: map[string]any{
+				a2a.NewTextPart(modelTextRequiresApproval),
+				func() *a2a.Part {
+					p := a2a.NewDataPart(map[string]any{"name": approvalToolName})
+					p.Metadata = map[string]any{"adk_is_long_running": false, "adk_type": "function_call"}
+					return p
+				}(),
+				func() *a2a.Part {
+					p := a2a.NewDataPart(map[string]any{
 						"name":     approvalToolName,
 						"response": map[string]any{"status": string(approvalStatusPending)},
-					},
-					Metadata: map[string]any{"adk_type": "function_response"},
-				},
+					})
+					p.Metadata = map[string]any{"adk_type": "function_response"}
+					return p
+				}(),
 			},
 			wantSecondArtifactParts: a2a.ContentParts{
-				a2a.DataPart{
-					Data: map[string]any{
+				func() *a2a.Part {
+					p := a2a.NewDataPart(map[string]any{
 						"name":     approvalToolName,
 						"response": map[string]any{"status": string(approvalStatusVerified)},
-					},
-					Metadata: map[string]any{"adk_type": "function_response"},
-				},
-				a2a.TextPart{Text: modelTextTaskComplete},
+					})
+					p.Metadata = map[string]any{"adk_type": "function_response"}
+					return p
+				}(),
+				a2a.NewTextPart(modelTextTaskComplete),
 			},
 		},
 	}
@@ -145,7 +148,7 @@ func TestA2AInputRequired(t *testing.T) {
 
 			// Initial message triggers input required
 			taskContent := "Perform important task!"
-			msg1 := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: taskContent})
+			msg1 := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(taskContent))
 			task1 := mustSendMessage(t, client, msg1)
 			if task1.Status.State != a2a.TaskStateInputRequired {
 				t.Fatalf("client.SendMessage(Initial) result state = %q, want %q", task1.Status.State, a2a.TaskStateInputRequired)
@@ -156,7 +159,7 @@ func TestA2AInputRequired(t *testing.T) {
 
 			// Incomplete followup keeps the task in input-required
 			incompleteFollowupText := "Is it really necessary?"
-			msg2 := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.TextPart{Text: incompleteFollowupText})
+			msg2 := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.NewTextPart(incompleteFollowupText))
 			task2 := mustSendMessage(t, client, msg2)
 			if task2.Status.State != a2a.TaskStateInputRequired {
 				t.Fatalf("client.SendMessage(IncompleteInput) result state = %q, want %q", task2.Status.State, a2a.TaskStateInputRequired)
@@ -173,16 +176,16 @@ func TestA2AInputRequired(t *testing.T) {
 			}
 			// The last part should be the error message
 			lastPart := task2.Status.Message.Parts[len(task2.Status.Message.Parts)-1]
-			tp, ok := lastPart.(a2a.TextPart)
-			if !ok {
+			tpText := lastPart.Text()
+			if tpText == "" {
 				t.Fatalf("last part is not TextPart")
 			}
-			if !strings.Contains(tp.Text, "no input provided") {
-				t.Errorf("last part text = %q; want it to contain 'no input provided'", tp.Text)
+			if !strings.Contains(tpText, "no input provided") {
+				t.Errorf("last part text = %q; want it to contain 'no input provided'", tpText)
 			}
 
 			// Another incomplete followup should not accumulate error messages
-			msg2a := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.TextPart{Text: "Still debating?"})
+			msg2a := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.NewTextPart("Still debating?"))
 			task2a := mustSendMessage(t, client, msg2a)
 			if task2a.Status.State != a2a.TaskStateInputRequired {
 				t.Fatalf("client.SendMessage(IncompleteInput 2) result state = %q, want %q", task2a.Status.State, a2a.TaskStateInputRequired)
@@ -191,7 +194,7 @@ func TestA2AInputRequired(t *testing.T) {
 			// Count validation errors in parts
 			validationErrors := 0
 			for _, p := range task2a.Status.Message.Parts {
-				if tp, ok := p.(a2a.TextPart); ok && strings.Contains(tp.Text, "no input provided") {
+				if p.Text() != "" && strings.Contains(p.Text(), "no input provided") {
 					validationErrors++
 				}
 			}
@@ -204,7 +207,7 @@ func TestA2AInputRequired(t *testing.T) {
 			approvedResponse := tc.createApproval(t, toolCall, pendingResponse)
 
 			msg3 := a2a.NewMessageForTask(a2a.MessageRoleUser, task2,
-				a2a.TextPart{Text: "LGTM"},
+				a2a.NewTextPart("LGTM"),
 				toA2AParts(t, []*genai.Part{approvedResponse}, []string{toolCall.ID})[0],
 			)
 			task3 := mustSendMessage(t, client, msg3)
@@ -268,7 +271,7 @@ func TestA2AMultiHopInputRequired(t *testing.T) {
 				genai.NewPartFromText(modelTextWaitingForApproval),
 			}, []string{}),
 			wantSecondArtifactParts: a2a.ContentParts{
-				a2a.TextPart{Text: modelTextTaskComplete},
+				a2a.NewTextPart(modelTextTaskComplete),
 			},
 		},
 		{
@@ -286,14 +289,15 @@ func TestA2AMultiHopInputRequired(t *testing.T) {
 				genai.NewPartFromFunctionResponse(approvalToolName, map[string]any{"status": string(approvalStatusPending)}),
 			}, []string{}),
 			wantSecondArtifactParts: a2a.ContentParts{
-				a2a.DataPart{
-					Data: map[string]any{
+				func() *a2a.Part {
+					p := a2a.NewDataPart(map[string]any{
 						"name":     approvalToolName,
 						"response": map[string]any{"status": string(approvalStatusVerified)},
-					},
-					Metadata: map[string]any{"adk_type": "function_response"},
-				},
-				a2a.TextPart{Text: modelTextTaskComplete},
+					})
+					p.Metadata = map[string]any{"adk_type": "function_response"}
+					return p
+				}(),
+				a2a.NewTextPart(modelTextTaskComplete),
 			},
 		},
 	}
@@ -319,14 +323,14 @@ func TestA2AMultiHopInputRequired(t *testing.T) {
 			client := newA2AClient(t, serverA)
 
 			// Initial message triggers input required
-			msg1 := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "Hello, perform important task!"})
+			msg1 := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("Hello, perform important task!"))
 			task1 := mustSendMessage(t, client, msg1)
 			if task1.Status.State != a2a.TaskStateInputRequired {
 				t.Fatalf("client.SendMessage(Initial) result state = %q, want %q", task1.Status.State, a2a.TaskStateInputRequired)
 			}
 
 			// Incomplete followup keeps the task in input-required
-			msg2 := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.TextPart{Text: "Is it really necessary?"})
+			msg2 := a2a.NewMessageForTask(a2a.MessageRoleUser, task1, a2a.NewTextPart("Is it really necessary?"))
 			task2 := mustSendMessage(t, client, msg2)
 			if task2.Status.State != a2a.TaskStateInputRequired {
 				t.Fatalf("client.SendMessage(IncompleteInput) result state = %q, want %q", task2.Status.State, a2a.TaskStateInputRequired)
@@ -336,7 +340,7 @@ func TestA2AMultiHopInputRequired(t *testing.T) {
 			toolCall, pendingResponse := findLongRunningCall(t, toGenaiParts(t, filterPartial(task2.Status.Message.Parts)))
 			approvedResponse := tc.createApproval(t, toolCall, pendingResponse)
 			msg3 := a2a.NewMessageForTask(a2a.MessageRoleUser, task2,
-				a2a.TextPart{Text: "LGTM"},
+				a2a.NewTextPart("LGTM"),
 				toA2AParts(t, []*genai.Part{approvedResponse}, nil)[0],
 			)
 			task3 := mustSendMessage(t, client, msg3)
@@ -399,8 +403,8 @@ func TestA2ASingleHopFinalResponse(t *testing.T) {
 			},
 			wantState: a2a.TaskStateCompleted,
 			wantArtifactParts: a2a.ContentParts{
-				a2a.TextPart{Text: "Hello, I am beep!"},
-				a2a.TextPart{Text: "I am boop. We are here to help!"},
+				a2a.NewTextPart("Hello, I am beep!"),
+				a2a.NewTextPart("I am boop. We are here to help!"),
 			},
 			wantPartial: true,
 		},
@@ -419,8 +423,8 @@ func TestA2ASingleHopFinalResponse(t *testing.T) {
 			},
 			wantState: a2a.TaskStateCompleted,
 			wantArtifactParts: a2a.ContentParts{
-				a2a.TextPart{Text: "Hello, I am beep!"},
-				a2a.TextPart{Text: "I am boop. We are here to help!"},
+				a2a.NewTextPart("Hello, I am beep!"),
+				a2a.NewTextPart("I am boop. We are here to help!"),
 			},
 		},
 		{
@@ -494,7 +498,7 @@ func TestA2ASingleHopFinalResponse(t *testing.T) {
 			defer server.Close()
 
 			client := newA2AClient(t, server)
-			msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "Tell me about the current weather"})
+			msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("Tell me about the current weather"))
 			task := mustSendMessage(t, client, msg)
 			if task.Status.State != tc.wantState {
 				t.Fatalf("client.SendMessage(Initial) result state = %q, want %q", task.Status.State, tc.wantState)
@@ -515,7 +519,7 @@ func TestA2ASingleHopFinalResponse(t *testing.T) {
 				if task.Status.Message == nil || len(task.Status.Message.Parts) != 1 {
 					t.Fatalf("got status message = %v, want message with one part", task.Status.Message)
 				}
-				if tp, ok := task.Status.Message.Parts[0].(a2a.TextPart); !ok || !strings.Contains(tp.Text, tc.wantStatusContain) {
+				if tpText := task.Status.Message.Parts[0].Text(); tpText == "" || !strings.Contains(tpText, tc.wantStatusContain) {
 					t.Fatalf("got status message = %v, want text containing %q", task.Status.Message.Parts[0], tc.wantStatusContain)
 				}
 			}
@@ -540,7 +544,11 @@ func TestA2ASingleHopFinalResponse(t *testing.T) {
 			} else {
 				partialArtifact = task.Artifacts[1]
 			}
-			wantPartialParts := a2a.ContentParts{a2a.DataPart{Data: map[string]any{}, Metadata: map[string]any{"adk_partial": true}}}
+			wantPartialParts := a2a.ContentParts{func() *a2a.Part {
+				p := a2a.NewDataPart(map[string]any{})
+				p.Metadata = map[string]any{"adk_partial": true}
+				return p
+			}()}
 			if diff := cmp.Diff(wantPartialParts, partialArtifact.Parts); diff != "" {
 				t.Fatalf("task wrong artifact parts (+got,-want) diff = %s", diff)
 			}
@@ -569,13 +577,13 @@ func TestA2ARemoteAgentStreamingGeminiSuccess(t *testing.T) {
 
 	ctx := t.Context()
 	client := newA2AClient(t, serverA)
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "tell me about the capital of Poland"})
+	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("tell me about the capital of Poland"))
 	msg.ContextID = a2a.NewContextID()
 
 	// Make streaming request and aggregate results
 	var taskID a2a.TaskID
 	partialText, finalText := "", ""
-	for event, err := range client.SendStreamingMessage(t.Context(), &a2a.MessageSendParams{Message: msg}) {
+	for event, err := range client.SendStreamingMessage(t.Context(), &a2a.SendMessageRequest{Message: msg}) {
 		if err != nil {
 			t.Fatalf("client.SendStreamingMessage() error = %v", err)
 		}
@@ -584,7 +592,7 @@ func TestA2ARemoteAgentStreamingGeminiSuccess(t *testing.T) {
 				if len(tau.Artifact.Parts) != 1 {
 					t.Fatalf("got %d parts in final partial artifact update, want 1", len(tau.Artifact.Parts))
 				}
-				if dp, ok := tau.Artifact.Parts[0].(a2a.DataPart); !ok || len(dp.Data) > 0 {
+				if tau.Artifact.Parts[0].Data() == nil {
 					t.Fatalf("got %v part in final partial artifact update, want empty data part", tau.Artifact.Parts[0])
 				}
 				continue
@@ -592,7 +600,7 @@ func TestA2ARemoteAgentStreamingGeminiSuccess(t *testing.T) {
 
 			if adka2a.IsPartial(tau.Metadata) {
 				for _, p := range tau.Artifact.Parts {
-					partialText += p.(a2a.TextPart).Text
+					partialText += p.Text()
 				}
 				continue
 			}
@@ -600,7 +608,7 @@ func TestA2ARemoteAgentStreamingGeminiSuccess(t *testing.T) {
 			if len(finalText) > 0 {
 				t.Fatal("got multiple non-partial updates, want 1")
 			}
-			finalText = tau.Artifact.Parts[0].(a2a.TextPart).Text
+			finalText = tau.Artifact.Parts[0].Text()
 		}
 		taskID = event.TaskInfo().TaskID
 	}
@@ -614,7 +622,7 @@ func TestA2ARemoteAgentStreamingGeminiSuccess(t *testing.T) {
 	}
 
 	// Check A2A Task state
-	task, err := client.GetTask(ctx, &a2a.TaskQueryParams{ID: taskID})
+	task, err := client.GetTask(ctx, &a2a.GetTaskRequest{ID: taskID})
 	if err != nil {
 		t.Fatalf("client.GetTask() error = %v", err)
 	}
@@ -681,12 +689,12 @@ func TestA2ARemoteAgentStreamingGeminiError(t *testing.T) {
 
 	ctx := t.Context()
 	client := newA2AClient(t, serverA)
-	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "tell me about the capital of Poland"})
+	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("tell me about the capital of Poland"))
 	msg.ContextID = a2a.NewContextID()
 
 	// Make streaming request and aggregate results
 	var taskID a2a.TaskID
-	for event, err := range client.SendStreamingMessage(t.Context(), &a2a.MessageSendParams{Message: msg}) {
+	for event, err := range client.SendStreamingMessage(t.Context(), &a2a.SendMessageRequest{Message: msg}) {
 		if err != nil {
 			t.Fatalf("client.SendStreamingMessage() error = %v", err)
 		}
@@ -694,7 +702,7 @@ func TestA2ARemoteAgentStreamingGeminiError(t *testing.T) {
 	}
 
 	// Check A2A Task state
-	task, err := client.GetTask(ctx, &a2a.TaskQueryParams{ID: taskID})
+	task, err := client.GetTask(ctx, &a2a.GetTaskRequest{ID: taskID})
 	if err != nil {
 		t.Fatalf("client.GetTask() error = %v", err)
 	}
@@ -704,13 +712,13 @@ func TestA2ARemoteAgentStreamingGeminiError(t *testing.T) {
 	if task.Status.Message == nil || len(task.Status.Message.Parts) != 1 {
 		t.Fatalf("task status message = %v, want 1 part", task.Status.Message)
 	}
-	if tp, ok := task.Status.Message.Parts[0].(a2a.TextPart); !ok || !strings.Contains(tp.Text, errorMessage) {
+	if tpText := task.Status.Message.Parts[0].Text(); tpText == "" || !strings.Contains(tpText, errorMessage) {
 		t.Fatalf("task status message = %v, want containing %q", task.Status.Message.Parts[0], errorMessage)
 	}
 	if len(task.Artifacts) != 1 || len(adka2a.WithoutPartialArtifacts(task.Artifacts)) != 0 {
 		t.Fatalf("task artifacts = %v, want single partial artifact", task.Artifacts)
 	}
-	if dp, ok := task.Artifacts[0].Parts[0].(a2a.DataPart); !ok || len(dp.Data) != 0 {
+	if task.Artifacts[0].Parts[0].Data() != nil {
 		t.Fatalf("task artifact = %v, want reset partial artifact", task.Artifacts[0])
 	}
 
@@ -860,7 +868,7 @@ func newAgentExecutor(agnt agent.Agent, service session.Service, mode adka2a.Out
 
 func mustSendMessage(t *testing.T, client *a2aclient.Client, msg *a2a.Message) *a2a.Task {
 	t.Helper()
-	sendParams := &a2a.MessageSendParams{Message: msg}
+	sendParams := &a2a.SendMessageRequest{Message: msg}
 	result, err := client.SendMessage(t.Context(), sendParams)
 	if err != nil {
 		t.Fatalf("client.SendMessage() error = %v", err)
@@ -872,17 +880,16 @@ func mustSendMessage(t *testing.T, client *a2aclient.Client, msg *a2a.Message) *
 	return task
 }
 
-func filterPartial(parts []a2a.Part) []a2a.Part {
-	var result []a2a.Part
+func filterPartial(parts []*a2a.Part) []*a2a.Part {
+	var result []*a2a.Part
 	for _, p := range parts {
-		if b, _ := p.Meta()[adka2a.ToA2AMetaKey("partial")].(bool); b {
+		if b, _ := p.Metadata[adka2a.ToA2AMetaKey("partial")].(bool); b {
 			continue
 		}
 		result = append(result, p)
 	}
 	return result
 }
-
 func findLongRunningCall(t *testing.T, parts []*genai.Part) (*genai.FunctionCall, *genai.FunctionResponse) {
 	t.Helper()
 	content := genai.NewContentFromParts(parts, genai.RoleModel)
@@ -905,7 +912,7 @@ func findLongRunningCall(t *testing.T, parts []*genai.Part) (*genai.FunctionCall
 	return call, response
 }
 
-func toA2AParts(t *testing.T, parts []*genai.Part, callIDs []string) []a2a.Part {
+func toA2AParts(t *testing.T, parts []*genai.Part, callIDs []string) []*a2a.Part {
 	t.Helper()
 	a2aParts, err := adka2a.ToA2AParts(parts, callIDs)
 	if err != nil {
@@ -914,7 +921,7 @@ func toA2AParts(t *testing.T, parts []*genai.Part, callIDs []string) []a2a.Part 
 	return a2aParts
 }
 
-func toGenaiParts(t *testing.T, a2aParts []a2a.Part) []*genai.Part {
+func toGenaiParts(t *testing.T, a2aParts []*a2a.Part) []*genai.Part {
 	t.Helper()
 	parts, err := adka2a.ToGenAIParts(a2aParts)
 	if err != nil {
@@ -945,8 +952,8 @@ func newA2AClient(t *testing.T, server *testA2AServer) *a2aclient.Client {
 	t.Helper()
 
 	result, err := a2aclient.NewFromCard(t.Context(), &a2a.AgentCard{
-		PreferredTransport: a2a.TransportProtocolJSONRPC,
-		URL:                server.URL, Capabilities: a2a.AgentCapabilities{Streaming: true},
+		SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(server.URL, a2a.TransportProtocolJSONRPC)},
+		Capabilities: a2a.AgentCapabilities{Streaming: true},
 	})
 	if err != nil {
 		t.Fatalf("a2aclient.NewFromEndpoints() error = %v", err)

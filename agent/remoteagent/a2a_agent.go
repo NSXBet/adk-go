@@ -35,17 +35,17 @@ import (
 //
 // If it returns non-nil result or error, the actual call is skipped and the returned value is used
 // as the agent invocation result.
-type BeforeA2ARequestCallback func(ctx agent.CallbackContext, req *a2a.MessageSendParams) (*session.Event, error)
+type BeforeA2ARequestCallback func(ctx agent.CallbackContext, req *a2a.SendMessageRequest) (*session.Event, error)
 
 // A2AEventConverter can be used to provide a custom implementation of A2A event transformation logic.
-type A2AEventConverter func(ctx agent.ReadonlyContext, req *a2a.MessageSendParams, event a2a.Event, err error) (*session.Event, error)
+type A2AEventConverter func(ctx agent.ReadonlyContext, req *a2a.SendMessageRequest, event a2a.Event, err error) (*session.Event, error)
 
 // AfterA2ARequestCallback is called after receiving a response from the remote agent and converting it to a session.Event.
 // In streaming responses the callback is invoked for every request. Session event parameter might be nil if conversion logic
 // decides to not emit an A2A event.
 //
 // If it returns non-nil result or error, it gets emitted instead of the original result.
-type AfterA2ARequestCallback func(ctx agent.CallbackContext, req *a2a.MessageSendParams, resp *session.Event, err error) (*session.Event, error)
+type AfterA2ARequestCallback func(ctx agent.CallbackContext, req *a2a.SendMessageRequest, resp *session.Event, err error) (*session.Event, error)
 
 // A2AConfig is used to describe and configure a remote agent.
 type A2AConfig struct {
@@ -94,8 +94,8 @@ type A2AConfig struct {
 
 	// ClientFactory can be used to provide a set of a2aclient.Client configurations.
 	ClientFactory *a2aclient.Factory
-	// MessageSendConfig is attached to a2a.MessageSendParams sent on every agent invocation.
-	MessageSendConfig *a2a.MessageSendConfig
+	// MessageSendConfig is attached to a2a.SendMessageRequest sent on every agent invocation.
+	MessageSendConfig *a2a.SendMessageConfig
 }
 
 // NewA2A creates a remote A2A agent. A2A (Agent-To-Agent) protocol is used for communication with an
@@ -148,7 +148,7 @@ func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*se
 			return
 		}
 
-		req := &a2a.MessageSendParams{Message: msg, Config: cfg.MessageSendConfig}
+		req := &a2a.SendMessageRequest{Message: msg, Config: cfg.MessageSendConfig}
 		processor := newRunProcessor(cfg, req)
 
 		if bcbResp, bcbErr := processor.runBeforeA2ARequestCallbacks(ctx); bcbResp != nil || bcbErr != nil {

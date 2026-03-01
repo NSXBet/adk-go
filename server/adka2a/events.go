@@ -101,7 +101,7 @@ func ToSessionEvent(ctx agent.InvocationContext, event a2a.Event) (*session.Even
 		return event, nil
 
 	case *a2a.TaskStatusUpdateEvent:
-		if v.Final {
+		if v.Status.State.Terminal() || v.Status.State == a2a.TaskStateInputRequired {
 			return finalTaskStatusUpdateToEvent(ctx, v)
 		}
 		if v.Status.Message == nil {
@@ -281,14 +281,13 @@ func finalTaskStatusUpdateToEvent(ctx agent.InvocationContext, update *a2a.TaskS
 	return event, nil
 }
 
-func getLongRunningToolIDs(parts []a2a.Part, converted []*genai.Part) []string {
+func getLongRunningToolIDs(parts []*a2a.Part, converted []*genai.Part) []string {
 	var ids []string
 	for i, part := range parts {
-		dp, ok := part.(a2a.DataPart)
-		if !ok {
+		if part.Data() == nil {
 			continue
 		}
-		if longRunning, ok := dp.Metadata[a2aDataPartMetaLongRunningKey].(bool); ok && longRunning {
+		if longRunning, ok := part.Metadata[a2aDataPartMetaLongRunningKey].(bool); ok && longRunning {
 			fnCall := converted[i]
 			if fnCall.FunctionCall == nil {
 				// TODO(yarolegovich): log a warning

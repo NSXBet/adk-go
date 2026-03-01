@@ -16,7 +16,6 @@ package adka2a
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -62,7 +61,7 @@ func IsPartialFlagSet(meta map[string]any) bool {
 
 // ToA2APart converts the provided genai part to A2A equivalent. Long running tool IDs are used for attaching metadata to
 // the relevant data parts.
-func ToA2APart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, error) {
+func ToA2APart(part *genai.Part, longRunningToolIDs []string) (*a2a.Part, error) {
 	parts, err := ToA2AParts([]*genai.Part{part}, longRunningToolIDs)
 	if err != nil {
 		return nil, err
@@ -72,11 +71,11 @@ func ToA2APart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, error) 
 
 // ToA2AParts converts the provided genai parts to A2A equivalents. Long running tool IDs are used for attaching metadata to
 // the relevant data parts.
-func ToA2AParts(parts []*genai.Part, longRunningToolIDs []string) ([]a2a.Part, error) {
-	result := make([]a2a.Part, len(parts))
+func ToA2AParts(parts []*genai.Part, longRunningToolIDs []string) ([]*a2a.Part, error) {
+	result := make([]*a2a.Part, len(parts))
 	for i, part := range parts {
 		if part.Text != "" {
-			r := a2a.TextPart{Text: part.Text}
+			r := a2a.NewTextPart(part.Text)
 			if part.Thought {
 				r.Metadata = map[string]any{ToA2AMetaKey("thought"): true}
 			}
@@ -98,84 +97,50 @@ func ToA2AParts(parts []*genai.Part, longRunningToolIDs []string) ([]a2a.Part, e
 	return result, nil
 }
 
-func updatePartsMetadata(parts []a2a.Part, update map[string]any) {
-	for i, part := range parts {
-		var meta map[string]any
-		switch p := part.(type) {
-		case a2a.TextPart:
-			if p.Metadata == nil {
-				p.Metadata = make(map[string]any)
-				parts[i] = p
-			}
-			meta = p.Metadata
-		case a2a.FilePart:
-			if p.Metadata == nil {
-				p.Metadata = make(map[string]any)
-				parts[i] = p
-			}
-			meta = p.Metadata
-		case a2a.DataPart:
-			if p.Metadata == nil {
-				p.Metadata = make(map[string]any)
-				parts[i] = p
-			}
-			meta = p.Metadata
-		default:
-			// TODO: log unknown part type warning (should never happen)
-			continue
+func updatePartsMetadata(parts []*a2a.Part, update map[string]any) {
+	for _, part := range parts {
+		if part.Metadata == nil {
+			part.Metadata = make(map[string]any)
 		}
-		maps.Copy(meta, update)
+		maps.Copy(part.Metadata, update)
 	}
 }
 
-func toA2AFilePart(v *genai.Part) (a2a.FilePart, error) {
+func toA2AFilePart(v *genai.Part) (*a2a.Part, error) {
 	if v == nil || (v.FileData == nil && v.InlineData == nil) {
-		return a2a.FilePart{}, fmt.Errorf("not a file part: %v", v)
+		return nil, fmt.Errorf("not a file part: %v", v)
 	}
 
 	if v.FileData != nil {
-		return a2a.FilePart{
-			File: a2a.FileURI{
-				FileMeta: a2a.FileMeta{
-					Name:     v.FileData.DisplayName,
-					MimeType: v.FileData.MIMEType,
-				},
-				URI: v.FileData.FileURI,
-			},
-		}, nil
+		p := a2a.NewFileURLPart(a2a.URL(v.FileData.FileURI), v.FileData.MIMEType)
+		p.Filename = v.FileData.DisplayName
+		return p, nil
 	}
 
-	part := a2a.FilePart{
-		File: a2a.FileBytes{
-			FileMeta: a2a.FileMeta{
-				Name:     v.InlineData.DisplayName,
-				MimeType: v.InlineData.MIMEType,
-			},
-			Bytes: base64.StdEncoding.EncodeToString(v.InlineData.Data),
-		},
-	}
+	p := a2a.NewRawPart(v.InlineData.Data)
+	p.MediaType = v.InlineData.MIMEType
+	p.Filename = v.InlineData.DisplayName
 
 	if v.VideoMetadata != nil {
 		data, err := converters.ToMapStructure(v.VideoMetadata)
 		if err != nil {
-			return a2a.FilePart{}, err
+			return nil, err
 		}
-		part.Metadata = map[string]any{"video_metadata": data}
+		p.Metadata = map[string]any{"video_metadata": data}
 	}
 
-	return part, nil
+	return p, nil
 }
 
-func toA2ADataPart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, error) {
+func toA2ADataPart(part *genai.Part, longRunningToolIDs []string) (*a2a.Part, error) {
 	if part.CodeExecutionResult != nil {
 		data, err := converters.ToMapStructure(part.CodeExecutionResult)
 		if err != nil {
 			return nil, err
 		}
-		return a2a.DataPart{
-			Data:     data,
-			Metadata: map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeCodeExecResult},
-		}, nil
+		p := a2a.NewDataPart(data)
+		p.Metadata = map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeCodeExecResult}
+		return p, nil
 	}
 
 	if part.FunctionResponse != nil {
@@ -183,10 +148,9 @@ func toA2ADataPart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, err
 		if err != nil {
 			return nil, err
 		}
-		return a2a.DataPart{
-			Data:     data,
-			Metadata: map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeFunctionResponse},
-		}, nil
+		p := a2a.NewDataPart(data)
+		p.Metadata = map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeFunctionResponse}
+		return p, nil
 	}
 
 	if part.ExecutableCode != nil {
@@ -194,10 +158,9 @@ func toA2ADataPart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, err
 		if err != nil {
 			return nil, err
 		}
-		return a2a.DataPart{
-			Data:     data,
-			Metadata: map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeCodeExecutableCode},
-		}, nil
+		p := a2a.NewDataPart(data)
+		p.Metadata = map[string]any{a2aDataPartMetaTypeKey: a2aDataPartTypeCodeExecutableCode}
+		return p, nil
 	}
 
 	if part.FunctionCall != nil {
@@ -205,20 +168,19 @@ func toA2ADataPart(part *genai.Part, longRunningToolIDs []string) (a2a.Part, err
 		if err != nil {
 			return nil, err
 		}
-		return a2a.DataPart{
-			Data: data,
-			Metadata: map[string]any{
-				a2aDataPartMetaTypeKey:        a2aDataPartTypeFunctionCall,
-				a2aDataPartMetaLongRunningKey: slices.Contains(longRunningToolIDs, part.FunctionCall.ID),
-			},
-		}, nil
+		p := a2a.NewDataPart(data)
+		p.Metadata = map[string]any{
+			a2aDataPartMetaTypeKey:        a2aDataPartTypeFunctionCall,
+			a2aDataPartMetaLongRunningKey: slices.Contains(longRunningToolIDs, part.FunctionCall.ID),
+		}
+		return p, nil
 	}
 
 	mapStruct, err := converters.ToMapStructure(part)
 	if err != nil {
 		return nil, err
 	}
-	return a2a.DataPart{Data: mapStruct}, nil
+	return a2a.NewDataPart(mapStruct), nil
 }
 
 func toGenAIContent(ctx context.Context, msg *a2a.Message, converter A2APartConverter) (*genai.Content, error) {
@@ -245,8 +207,8 @@ func toGenAIContent(ctx context.Context, msg *a2a.Message, converter A2APartConv
 }
 
 // ToGenAIPart converts the provided A2A part to a genai equivalent.
-func ToGenAIPart(part a2a.Part) (*genai.Part, error) {
-	parts, err := ToGenAIParts([]a2a.Part{part})
+func ToGenAIPart(part *a2a.Part) (*genai.Part, error) {
+	parts, err := ToGenAIParts([]*a2a.Part{part})
 	if err != nil {
 		return nil, err
 	}
@@ -254,60 +216,58 @@ func ToGenAIPart(part a2a.Part) (*genai.Part, error) {
 }
 
 // ToGenAIParts converts the provided A2A parts to genai equivalents.
-func ToGenAIParts(parts []a2a.Part) ([]*genai.Part, error) {
+func ToGenAIParts(parts []*a2a.Part) ([]*genai.Part, error) {
 	result := make([]*genai.Part, len(parts))
 	for i, part := range parts {
-		switch v := part.(type) {
-		case a2a.TextPart:
-			r := genai.NewPartFromText(v.Text)
-			if v.Metadata != nil {
-				if thought, ok := v.Metadata[ToA2AMetaKey("thought")].(bool); ok {
+		if _, ok := part.Content.(a2a.Text); ok {
+			r := genai.NewPartFromText(part.Text())
+			if part.Metadata != nil {
+				if thought, ok := part.Metadata[ToA2AMetaKey("thought")].(bool); ok {
 					r.Thought = thought
 				}
 			}
 			result[i] = r
-
-		case a2a.DataPart:
-			r, err := toGenAIDataPart(v)
+		} else if part.Data() != nil {
+			r, err := toGenAIDataPart(part)
 			if err != nil {
 				return nil, err
 			}
 			result[i] = r
-
-		case a2a.FilePart:
-			r, err := toGenAIFilePart(v)
+		} else if _, ok := part.Content.(a2a.Raw); ok {
+			r, err := toGenAIRawPart(part)
 			if err != nil {
 				return nil, err
 			}
 			result[i] = r
-
-		default:
-			return nil, fmt.Errorf("unknown part type: %T", v)
+		} else if _, ok := part.Content.(a2a.URL); ok {
+			r, err := toGenAIURLPart(part)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = r
+		} else {
+			return nil, fmt.Errorf("unknown part content type: %T", part.Content)
 		}
 	}
 	return result, nil
 }
 
-func toGenAIFilePart(part a2a.FilePart) (*genai.Part, error) {
-	switch v := part.File.(type) {
-	case a2a.FileBytes:
-		bytes, err := base64.StdEncoding.DecodeString(v.Bytes)
-		if err != nil {
-			return nil, err
-		}
-		data := &genai.Blob{Data: bytes, MIMEType: v.MimeType, DisplayName: v.Name}
-		return &genai.Part{InlineData: data}, nil
-
-	case a2a.FileURI:
-		data := &genai.FileData{FileURI: v.URI, MIMEType: v.MimeType, DisplayName: v.Name}
-		return &genai.Part{FileData: data}, nil
-
-	default:
-		return nil, fmt.Errorf("unknown file content type: %T", v)
+func toGenAIRawPart(part *a2a.Part) (*genai.Part, error) {
+	raw := part.Raw()
+	if raw == nil {
+		return nil, fmt.Errorf("raw part has no data")
 	}
+	data := &genai.Blob{Data: raw, MIMEType: part.MediaType, DisplayName: part.Filename}
+	return &genai.Part{InlineData: data}, nil
 }
 
-func toGenAIDataPart(part a2a.DataPart) (*genai.Part, error) {
+func toGenAIURLPart(part *a2a.Part) (*genai.Part, error) {
+	urlContent := part.URL()
+	data := &genai.FileData{FileURI: string(urlContent), MIMEType: part.MediaType, DisplayName: part.Filename}
+	return &genai.Part{FileData: data}, nil
+}
+
+func toGenAIDataPart(part *a2a.Part) (*genai.Part, error) {
 	if part.Metadata == nil {
 		return toGenAITextPart(part)
 	}
@@ -316,7 +276,7 @@ func toGenAIDataPart(part a2a.DataPart) (*genai.Part, error) {
 		return toGenAITextPart(part)
 	}
 
-	bytes, err := json.Marshal(part.Data)
+	bytes, err := json.Marshal(part.Data())
 	if err != nil {
 		return nil, err
 	}
@@ -355,8 +315,8 @@ func toGenAIDataPart(part a2a.DataPart) (*genai.Part, error) {
 	}
 }
 
-func toGenAITextPart(part a2a.DataPart) (*genai.Part, error) {
-	bytes, err := json.Marshal(part.Data)
+func toGenAITextPart(part *a2a.Part) (*genai.Part, error) {
+	bytes, err := json.Marshal(part.Data())
 	if err != nil {
 		return nil, err
 	}

@@ -86,15 +86,15 @@ func (a *a2aLauncher) SetupSubrouters(router *mux.Router, config *launcher.Confi
 
 	rootAgent := config.AgentLoader.RootAgent()
 	agentCard := &a2acore.AgentCard{
-		Name:                              rootAgent.Name(),
-		Description:                       rootAgent.Description(),
-		DefaultInputModes:                 []string{"text/plain"},
-		DefaultOutputModes:                []string{"text/plain"},
-		URL:                               publicURL,
-		PreferredTransport:                a2acore.TransportProtocolJSONRPC,
-		Skills:                            adka2a.BuildAgentSkills(rootAgent),
-		Capabilities:                      a2acore.AgentCapabilities{Streaming: true},
-		SupportsAuthenticatedExtendedCard: false,
+		Name:               rootAgent.Name(),
+		Description:        rootAgent.Description(),
+		DefaultInputModes:  []string{"text/plain"},
+		DefaultOutputModes: []string{"text/plain"},
+		SupportedInterfaces: []*a2acore.AgentInterface{
+			a2acore.NewAgentInterface(publicURL, a2acore.TransportProtocolJSONRPC),
+		},
+		Skills:       adka2a.BuildAgentSkills(rootAgent),
+		Capabilities: a2acore.AgentCapabilities{Streaming: true},
 	}
 	router.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(agentCard))
 

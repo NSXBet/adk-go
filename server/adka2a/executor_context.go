@@ -42,8 +42,8 @@ type ExecutorContext interface {
 	Events() session.Events
 	// UserContent is a converted A2A message which is passed to runner.Run.
 	UserContent() *genai.Content
-	// RequestContext containts information about the original A2A Request, the current task and related tasks.
-	RequestContext() *a2asrv.RequestContext
+	// A2AExecutorContext contains information about the original A2A Request, the current task and related tasks.
+	A2AExecutorContext() *a2asrv.ExecutorContext
 }
 
 type executorContext struct {
@@ -90,8 +90,8 @@ func (ec *executorContext) Events() session.Events {
 	return session.Events()
 }
 
-func (ec *executorContext) RequestContext() *a2asrv.RequestContext {
-	return ec.meta.reqCtx
+func (ec *executorContext) A2AExecutorContext() *a2asrv.ExecutorContext {
+	return ec.meta.execCtx
 }
 
 func (ec *executorContext) UserContent() *genai.Content {

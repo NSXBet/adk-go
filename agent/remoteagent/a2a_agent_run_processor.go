@@ -43,7 +43,7 @@ type artifactAggregation struct {
 type a2aAgentRunProcessor struct {
 	config A2AConfig
 
-	request *a2a.MessageSendParams
+	request *a2a.SendMessageRequest
 
 	// partial event contents emitted before the terminal event
 	aggregations map[a2a.ArtifactID]*artifactAggregation
@@ -51,7 +51,7 @@ type a2aAgentRunProcessor struct {
 	aggregationOrder []a2a.ArtifactID
 }
 
-func newRunProcessor(config A2AConfig, request *a2a.MessageSendParams) *a2aAgentRunProcessor {
+func newRunProcessor(config A2AConfig, request *a2a.SendMessageRequest) *a2aAgentRunProcessor {
 	return &a2aAgentRunProcessor{
 		config:       config,
 		request:      request,
@@ -70,7 +70,7 @@ func (p *a2aAgentRunProcessor) aggregatePartial(ctx agent.InvocationContext, a2a
 	}
 
 	// RemoteAgent event stream finished, emit any aggregated events data we have before the final event
-	if statusUpdate, ok := a2aEvent.(*a2a.TaskStatusUpdateEvent); ok && statusUpdate.Final {
+	if statusUpdate, ok := a2aEvent.(*a2a.TaskStatusUpdateEvent); ok && statusUpdate.Status.State.Terminal() {
 		var events []*session.Event
 		for _, aid := range p.aggregationOrder {
 			if agg, ok := p.aggregations[aid]; ok {

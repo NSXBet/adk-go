@@ -24,21 +24,21 @@ import (
 )
 
 type artifactMaker struct {
-	reqCtx                   *a2asrv.RequestContext
+	execCtx                  *a2asrv.ExecutorContext
 	lastAgentPartialArtifact map[string]a2a.ArtifactID
 }
 
-func newArtifactMaker(reqCtx *a2asrv.RequestContext) *artifactMaker {
+func newArtifactMaker(execCtx *a2asrv.ExecutorContext) *artifactMaker {
 	return &artifactMaker{
-		reqCtx:                   reqCtx,
+		execCtx:                  execCtx,
 		lastAgentPartialArtifact: make(map[string]a2a.ArtifactID),
 	}
 }
 
 var _ eventToArtifactTransform = (*artifactMaker)(nil)
 
-func (m *artifactMaker) transform(event *session.Event, parts []a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error) {
-	result := a2a.NewArtifactEvent(m.reqCtx, parts...)
+func (m *artifactMaker) transform(event *session.Event, parts []*a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error) {
+	result := a2a.NewArtifactEvent(m.execCtx, parts...)
 
 	if artifactID, ok := m.lastAgentPartialArtifact[event.Author]; ok {
 		result.Artifact.ID = artifactID
@@ -68,7 +68,7 @@ func (m *artifactMaker) makeFinalUpdate() *a2a.TaskArtifactUpdateEvent {
 }
 
 type legacyArtifactMaker struct {
-	reqCtx *a2asrv.RequestContext
+	execCtx *a2asrv.ExecutorContext
 
 	// responseID is created once the first TaskArtifactUpdateEvent is sent. Used for subsequent artifact updates.
 	responseID a2a.ArtifactID
@@ -79,21 +79,21 @@ type legacyArtifactMaker struct {
 	partialResponseID a2a.ArtifactID
 }
 
-func newLegacyArtifactMaker(reqCtx *a2asrv.RequestContext) *legacyArtifactMaker {
+func newLegacyArtifactMaker(execCtx *a2asrv.ExecutorContext) *legacyArtifactMaker {
 	return &legacyArtifactMaker{
-		reqCtx: reqCtx,
+		execCtx: execCtx,
 	}
 }
 
 var _ eventToArtifactTransform = (*legacyArtifactMaker)(nil)
 
-func (p *legacyArtifactMaker) transform(event *session.Event, parts []a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error) {
+func (p *legacyArtifactMaker) transform(event *session.Event, parts []*a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error) {
 	var result *a2a.TaskArtifactUpdateEvent
 	if event.Partial {
-		result = newLegacyPartialArtifactUpdate(p.reqCtx, p.partialResponseID, parts)
+		result = newLegacyPartialArtifactUpdate(p.execCtx, p.partialResponseID, parts)
 		p.partialResponseID = result.Artifact.ID
 	} else {
-		result = newLegacyArtifactUpdate(p.reqCtx, p.responseID, parts)
+		result = newLegacyArtifactUpdate(p.execCtx, p.responseID, parts)
 		p.responseID = result.Artifact.ID
 	}
 	if len(meta) > 0 {
@@ -109,12 +109,12 @@ func (p *legacyArtifactMaker) makeFinalUpdate() *a2a.TaskArtifactUpdateEvent {
 	if p.partialResponseID == "" {
 		return nil
 	}
-	ev := newLegacyPartialArtifactUpdate(p.reqCtx, p.partialResponseID, []a2a.Part{a2a.DataPart{Data: map[string]any{}}})
+	ev := newLegacyPartialArtifactUpdate(p.execCtx, p.partialResponseID, []*a2a.Part{a2a.NewDataPart(map[string]any{})})
 	ev.LastChunk = true
 	return ev
 }
 
-func newLegacyArtifactUpdate(task a2a.TaskInfoProvider, id a2a.ArtifactID, parts []a2a.Part) *a2a.TaskArtifactUpdateEvent {
+func newLegacyArtifactUpdate(task a2a.TaskInfoProvider, id a2a.ArtifactID, parts []*a2a.Part) *a2a.TaskArtifactUpdateEvent {
 	var result *a2a.TaskArtifactUpdateEvent
 	if id == "" {
 		result = a2a.NewArtifactEvent(task, parts...)
@@ -127,7 +127,7 @@ func newLegacyArtifactUpdate(task a2a.TaskInfoProvider, id a2a.ArtifactID, parts
 	return result
 }
 
-func newLegacyPartialArtifactUpdate(task a2a.TaskInfoProvider, artifactID a2a.ArtifactID, parts []a2a.Part) *a2a.TaskArtifactUpdateEvent {
+func newLegacyPartialArtifactUpdate(task a2a.TaskInfoProvider, artifactID a2a.ArtifactID, parts []*a2a.Part) *a2a.TaskArtifactUpdateEvent {
 	ev := newLegacyArtifactUpdate(task, artifactID, parts)
 	updatePartsMetadata(parts, map[string]any{metadataPartialKey: true})
 	if ev.Artifact.Metadata == nil {

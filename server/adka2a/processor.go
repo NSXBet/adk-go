@@ -27,12 +27,12 @@ import (
 )
 
 type eventToArtifactTransform interface {
-	transform(event *session.Event, parts []a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error)
+	transform(event *session.Event, parts []*a2a.Part, meta map[string]any) (*a2a.TaskArtifactUpdateEvent, error)
 	makeFinalUpdate() *a2a.TaskArtifactUpdateEvent
 }
 
 type eventProcessor struct {
-	reqCtx        *a2asrv.RequestContext
+	execCtx       *a2asrv.ExecutorContext
 	meta          invocationMeta
 	partConverter GenAIPartConverter
 
@@ -54,15 +54,15 @@ type eventProcessor struct {
 }
 
 func newEventProcessor(
-	reqCtx *a2asrv.RequestContext,
+	execCtx *a2asrv.ExecutorContext,
 	meta invocationMeta,
 	converter GenAIPartConverter,
 	transform eventToArtifactTransform,
 ) *eventProcessor {
 	return &eventProcessor{
-		inputRequiredProcessor: newInputRequiredProcessor(reqCtx),
+		inputRequiredProcessor: newInputRequiredProcessor(execCtx),
 		partConverter:          converter,
-		reqCtx:                 reqCtx,
+		execCtx:                execCtx,
 		meta:                   meta,
 		eventToArtifact:        transform,
 	}
@@ -87,7 +87,7 @@ func (p *eventProcessor) process(ctx context.Context, event *session.Event) (*a2
 			// terminal event might add additional keys to its metadata when it's dispatched and these changes should
 			// not be reflected in this event's metadata
 			terminalEventMeta := maps.Clone(eventMeta)
-			p.failedEvent = toTaskFailedUpdateEvent(p.reqCtx, errorFromResponse(&resp), terminalEventMeta)
+			p.failedEvent = toTaskFailedUpdateEvent(p.execCtx, errorFromResponse(&resp), terminalEventMeta)
 		}
 	}
 
@@ -124,8 +124,7 @@ func (p *eventProcessor) makeFinalStatusUpdate() *a2a.TaskStatusUpdateEvent {
 		}
 	}
 
-	ev := a2a.NewStatusUpdateEvent(p.reqCtx, a2a.TaskStateCompleted, nil)
-	ev.Final = true
+	ev := a2a.NewStatusUpdateEvent(p.execCtx, a2a.TaskStateCompleted, nil)
 	// we're modifying base processor metadata which might have been sent with one of the previous events.
 	// this update shouldn't be reflected in the sent events' metadata.
 	baseMetaCopy := maps.Clone(p.meta.eventMeta)
@@ -142,7 +141,7 @@ func (p *eventProcessor) makeTaskFailedEvent(cause error, event *session.Event) 
 			meta = eventMeta
 		}
 	}
-	return toTaskFailedUpdateEvent(p.reqCtx, cause, meta)
+	return toTaskFailedUpdateEvent(p.execCtx, cause, meta)
 }
 
 func (p *eventProcessor) updateTerminalActions(event *session.Event) {
@@ -152,7 +151,7 @@ func (p *eventProcessor) updateTerminalActions(event *session.Event) {
 	}
 }
 
-func (p *eventProcessor) convertParts(ctx context.Context, event *session.Event) ([]a2a.Part, error) {
+func (p *eventProcessor) convertParts(ctx context.Context, event *session.Event) ([]*a2a.Part, error) {
 	if event.Content == nil || len(event.Content.Parts) == 0 {
 		return nil, nil
 	}
@@ -160,7 +159,7 @@ func (p *eventProcessor) convertParts(ctx context.Context, event *session.Event)
 	if p.partConverter == nil {
 		return ToA2AParts(parts, event.LongRunningToolIDs)
 	}
-	converted := make([]a2a.Part, 0, len(parts))
+	converted := make([]*a2a.Part, 0, len(parts))
 	for _, part := range parts {
 		cp, err := p.partConverter(ctx, event, part)
 		if err != nil {
@@ -175,10 +174,9 @@ func (p *eventProcessor) convertParts(ctx context.Context, event *session.Event)
 }
 
 func toTaskFailedUpdateEvent(task a2a.TaskInfoProvider, cause error, meta map[string]any) *a2a.TaskStatusUpdateEvent {
-	msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, task, a2a.TextPart{Text: cause.Error()})
+	msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, task, a2a.NewTextPart(cause.Error()))
 	ev := a2a.NewStatusUpdateEvent(task, a2a.TaskStateFailed, msg)
 	ev.Metadata = meta
-	ev.Final = true
 	return ev
 }
 
