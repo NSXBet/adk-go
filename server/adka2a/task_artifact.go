@@ -103,15 +103,12 @@ func (p *legacyArtifactMaker) transform(event *session.Event, parts []*a2a.Part,
 }
 
 func (p *legacyArtifactMaker) makeFinalUpdate() *a2a.TaskArtifactUpdateEvent {
-	// We could also send a LastChunk: true event for the main (non-partial) artifact,
-	// but there's currently no special handling for it and not all A2A SDK (eg. Java)
-	// implementations allow empty-part artifact updates.
-	if p.partialResponseID == "" {
-		return nil
-	}
-	ev := newLegacyPartialArtifactUpdate(p.execCtx, p.partialResponseID, []*a2a.Part{a2a.NewDataPart(map[string]any{})})
-	ev.LastChunk = true
-	return ev
+	// Do NOT send an empty artifact update with LastChunk: true. That would replace the
+	// partial artifact content with empty in the task store, causing SendMessage to return
+	// a task with no artifacts/history. The partial artifact already has the accumulated
+	// response; leave it as-is. Clients get completion via the subsequent TaskStatusUpdateEvent
+	// with state COMPLETED.
+	return nil
 }
 
 func newLegacyArtifactUpdate(task a2a.TaskInfoProvider, id a2a.ArtifactID, parts []*a2a.Part) *a2a.TaskArtifactUpdateEvent {
@@ -136,6 +133,8 @@ func newLegacyPartialArtifactUpdate(task a2a.TaskInfoProvider, artifactID a2a.Ar
 		ev.Artifact.Metadata[metadataPartialKey] = true
 	}
 	ev.Metadata[metadataPartialKey] = true
-	ev.Append = false // discard partial events
+	// First event (artifactID=="") adds the artifact; subsequent events append to accumulate chunks.
+	// With Append=false for all, each partial would replace and we'd lose the response.
+	ev.Append = (artifactID != "")
 	return ev
 }
