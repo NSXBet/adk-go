@@ -164,6 +164,7 @@ func TestGenerateRequestConfirmationEvent(t *testing.T) {
 						},
 					},
 				},
+				Actions: session.EventActions{StateDelta: map[string]any{}},
 			},
 		},
 	}
